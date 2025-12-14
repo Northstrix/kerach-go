@@ -1,5 +1,5 @@
 # Kerach Go
-A petite text shaderer whose entire code fits into a single.html file.
+A petite text shaderer whose entire code fits into a single html file.
 
 SourceForge: https://sourceforge.net/projects/kerach-go/
 
