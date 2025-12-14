@@ -1,0 +1,2201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kerach Go</title>
+    <link rel="icon" type="image/png" href="logo.png">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&family=Quicksand:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                        body: ['Inter', 'sans-serif']
+                    },
+                    colors: {
+                        border: "rgba(255,255,255,0.1)",
+                        background: "#000000",
+                        foreground: "#ffffff",
+                        accent: "#00A2FA", 
+                        muted: "#1a1a1a",
+                        "muted-foreground": "#a1a1aa"
+                    },
+                    borderRadius: {
+                        'squircle': '18px',
+                    },
+                    animation: {
+                        'spin-slow': 'spin 4s linear infinite',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Libraries -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.4.2/chroma.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <style>
+        body, html { margin: 0; padding: 0; height: 100vh; background: #000; color: #fff; overflow: hidden; }
+        #root { position: relative; z-index: 10; height: 100vh; width: 100vw; display: flex; flex-direction: column; }
+        
+        /* Glassmorphism */
+        .glass-panel {
+            background: rgba(10, 10, 10, 0.7);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+        /* Badges */
+        .badge-icon {
+            display: inline-block; width: 10px; height: 10px; margin-inline-end: 4px;
+            background: currentColor;
+            -webkit-mask-size: contain; mask-size: contain;
+            -webkit-mask-position: center; mask-position: center;
+            -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+        }
+        .badge-check { -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'); }
+        .badge-cross { -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'); }
+
+        /* Inputs */
+        input[type=range] { -webkit-appearance: none; background: transparent; }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%;
+            background: #fff; cursor: pointer; margin-top: -6px;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px; cursor: pointer; background: #333; border-radius: 2px;
+        }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // =========================================================================
+        // SHADER DEFINITIONS
+        // =========================================================================
+
+        const vertexShader = `
+        varying vec2 vUv;
+
+        void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+        `;
+
+        const hueSatHelpers = `
+        vec3 rgb2hsv(vec3 c) {
+            vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+            vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+            vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+
+            float d = q.x - min(q.w, q.y);
+            float e = 1.0e-10;
+            return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+        }
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+        `;
+
+        const flowVertShader = `
+        attribute vec2 a_position;
+        void main() {
+            gl_Position = vec4(a_position, 0.0, 1.0);
+        }
+        `;
+
+        const flowFragShader = `
+        precision highp float;
+        uniform float uTime;
+        uniform vec2 uResolution;
+        uniform float uVelocity;
+        uniform float uDetail;
+        uniform float uTwist;
+        uniform float uSpeed;
+        uniform float uContrast;
+        uniform float uRgbMultiplierR;
+        uniform float uRgbMultiplierG;
+        uniform float uRgbMultiplierB;
+        uniform float uColorOffset;
+        uniform float uHue;
+        uniform float uSaturation;
+
+        vec3 rgb2hsv(vec3 c) {
+            vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+            vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+            vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+
+            float d = q.x - min(q.w, q.y);
+            float e = 1.0e-10;
+            return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+        }
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        float f(in vec2 p) {
+            return sin(p.x + sin(p.y + uTime * uVelocity)) * sin(p.y * p.x * 0.1 + uTime * uVelocity);
+        }
+
+        void main() {
+            vec2 p = (gl_FragCoord.xy * 2.0 - uResolution) / min(uResolution.x, uResolution.y);
+            float uScale = 5.0;
+            p *= uScale;
+
+            vec2 ep = vec2(0.05, 0.0);
+            vec2 rz = vec2(0.0);
+
+            for (int i = 0; i < 20; i++) {
+                float t0 = f(p);
+                float t1 = f(p + ep.xy);
+                float t2 = f(p + ep.yx);
+                vec2 g = vec2((t1 - t0), (t2 - t0)) / ep.xx;
+                vec2 t = vec2(-g.y, g.x);
+
+                p += (uTwist * 0.01) * t + g * (1.0 / uDetail);
+                p.x += sin(uTime * uSpeed / 10.0) / 10.0;
+                p.y += cos(uTime * uSpeed / 10.0) / 10.0;
+                rz = g;
+            }
+            
+            vec3 colorVec = vec3(rz * 0.5 + 0.5, 1.5);
+
+            colorVec.r *= uRgbMultiplierR;
+            colorVec.g *= uRgbMultiplierG;
+            colorVec.b *= uRgbMultiplierB;
+            
+            colorVec += uColorOffset;
+            
+            colorVec = (colorVec - 0.5) * uContrast + 0.5;
+
+            vec3 hsv = rgb2hsv(colorVec);
+            hsv.x += uHue / 360.0;
+            hsv.y *= uSaturation;
+            colorVec = hsv2rgb(hsv);
+
+            gl_FragColor = vec4(colorVec, 1.0);
+        }
+        `;
+
+        const meltFragShader = `precision highp float;
+
+        uniform float uTime;
+        uniform vec2  uResolution;
+
+        uniform float uSpeed;
+        uniform float uZoom;
+        uniform float uDetail;
+        uniform float uHue;
+        uniform float uSaturation;
+        uniform float uContrast;
+
+        ${hueSatHelpers}
+
+        // base field function, time‑scaled by uSpeed
+        float f(in vec2 p) {
+        float t = uTime * uSpeed;
+        return sin(p.x + sin(p.y + t * 0.2)) *
+                sin(p.y * p.x * 0.1 + t * 0.2);
+        }
+
+        void main() {
+        vec2 p = (gl_FragCoord.xy * 2.0 - uResolution) /
+                min(uResolution.x, uResolution.y);
+
+        float scale = max(0.1, uZoom);
+        p *= scale;
+
+        vec2 rz = vec2(0.0);
+        float stepMul = mix(0.0, 0.1, clamp(uDetail, 0.0, 1.0));
+
+        for (int i = 0; i < 15; i++) {
+            float t0 = f(p);
+            float t1 = f(p + vec2(0.05, 0.0));
+            vec2 g = vec2(
+            (t1 - t0),
+            (f(p + vec2(0.0, 0.05)) - t0)
+            ) / 0.05;
+            vec2 t = vec2(-g.y, g.x);
+            p += 0.05 * t + g * (0.2 + stepMul);
+            rz = g;
+        }
+
+        // base color from flow field
+        vec3 col = vec3(rz * 0.5 + 0.5, 1.0);
+
+        // per‑shader hue / saturation overlay, same style as other shaders
+        vec3 hsv = rgb2hsv(col);
+        hsv.x += uHue / 360.0;
+        hsv.y *= uSaturation;
+        col = hsv2rgb(hsv);
+
+        // per‑shader contrast
+        col = (col - 0.5) * uContrast + 0.5;
+
+        gl_FragColor = vec4(col, 1.0);
+        }`;
+
+        const balatroFragShader = `
+        precision highp float;
+        uniform float uTime;
+        uniform vec2 uResolution;
+        uniform float uSpeed;
+
+        uniform float uSpinRotation;
+        uniform float uSpinSpeed;
+        uniform vec3 uColor1;
+        uniform vec3 uColor2;
+        uniform vec3 uColor3;
+        uniform float uContrast;
+        uniform float uLighting;
+        uniform float uSpinAmount;
+        uniform float uPixelFilter;
+        uniform float uSpinEase;
+        uniform bool uIsRotate;
+
+        #define PI 3.14159265359
+
+        vec4 effect(vec2 screenSize, vec2 screen_coords) {
+            float pixel_size = length(screenSize.xy) / uPixelFilter;
+            vec2 uv = (floor(screen_coords.xy*(1./pixel_size))*pixel_size - 0.5*screenSize.xy)/length(screenSize.xy) - vec2(0.0);
+            float uv_len = length(uv);
+            
+            float speed = (uSpinRotation*uSpinEase*0.2);
+            if(uIsRotate){
+            speed = uTime * speed;
+            }
+            speed += 302.2;
+            float new_pixel_angle = atan(uv.y, uv.x) + speed - uSpinEase*20.*(1.*uSpinAmount*uv_len + (1. - 1.*uSpinAmount));
+            vec2 mid = (screenSize.xy/length(screenSize.xy))/2.;
+            uv = (vec2((uv_len * cos(new_pixel_angle) + mid.x), (uv_len * sin(new_pixel_angle) + mid.y)) - mid);
+            
+            uv *= 30.;
+            speed = uTime*(uSpinSpeed);
+            vec2 uv2 = vec2(uv.x+uv.y);
+            
+            for(int i=0; i < 5; i++) {
+                uv2 += sin(max(uv.x, uv.y)) + uv;
+                uv  += 0.5*vec2(cos(5.1123314 + 0.353*uv2.y + speed*0.131121),sin(uv2.x - 0.113*speed));
+                uv  -= 1.0*cos(uv.x + uv.y) - 1.0*sin(uv.x*0.711 - uv.y);
+            }
+            
+            float contrast_mod = (0.25*uContrast + 0.5*uSpinAmount + 1.2);
+            float paint_res = min(2., max(0.,length(uv)*(0.035)*contrast_mod));
+            float c1p = max(0.,1. - contrast_mod*abs(1.-paint_res));
+            float c2p = max(0.,1. - contrast_mod*abs(paint_res));
+            float c3p = 1. - min(1., c1p + c2p);
+            float light = (uLighting - 0.2)*max(c1p*5. - 4., 0.) + uLighting*max(c2p*5. - 4., 0.);
+            return (0.3/uContrast)*vec4(uColor1,1.0) + (1. - 0.3/uContrast)*(vec4(uColor1,1.0)*c1p + vec4(uColor2,1.0)*c2p + vec4(c3p*uColor3.rgb, c3p*1.0)) + light;
+        }
+
+        void main() {
+            vec2 uv = gl_FragCoord.xy/uResolution.xy;
+            gl_FragColor = effect(uResolution.xy, uv * uResolution.xy);
+        }
+        `;
+
+        const psychedelicGlassFragShader = `precision highp float;
+        uniform vec2 uResolution;
+        uniform float uTime;
+        uniform float uSpeed;
+        uniform float uSides;
+        uniform float uHue;
+        uniform float uSaturation;
+        uniform float uContrast;
+        uniform float uDensity;
+        uniform float uGlow;
+
+        ${hueSatHelpers}
+
+        vec3 palette(float t) {
+        vec3 a = vec3(0.8, 0.5, 0.4);
+        vec3 b = vec3(1.0, 1.0, 0.2);
+        vec3 c = vec3(1.0, 1.0, 1.0);
+        vec3 d = vec3(0.00, 0.25, 0.25);
+        return a + b * cos(6.28318 * (c * t + d));
+        }
+
+        // SDF Parallelogram (glass pane primitive)
+        float sdParallelogram(in vec2 p, float wi, float he, float sk) {
+            vec2 e = vec2(sk, he);
+            p = (p.y < 0.0) ? -p : p;
+            vec2 w = p - e; 
+            w.x -= clamp(w.x, -wi, wi);
+            vec2 d = vec2(dot(w, w), -w.y);
+            float s = p.x * e.y - p.y * e.x;
+            p = (s < 0.0) ? -p : p;
+            vec2 v = p - vec2(wi, 0.0);
+            v -= e * clamp(dot(v, e)/dot(e, e), -1.0, 1.0);
+            d = min(d, vec2(dot(v,v), wi*he - abs(s)));
+            return sqrt(d.x) * sign(-d.y);
+        }
+
+        // Line segment made of parallelograms
+        float sdLine(in vec2 p) {
+            float size = 0.5;
+            float width = size * 0.33;
+            return min(
+            sdParallelogram(p + vec2(-0.12, -0.5), 0.1, size * 1.5, size * 0.75),
+            sdParallelogram(p + vec2(width + size * 0.175, size * 1.52), 0.1, size, 0.)
+            );
+        }
+
+        // DON pattern (3 parallel lines)
+        float sdfDon(vec2 uv) {
+        float d1 = sdLine(uv);
+        float d2 = sdLine(uv + vec2(0.315, 0.0));
+        float d3 = sdLine(uv + vec2(0.63, 0.0));
+        return min(min(d1, d2), d3);
+        }
+
+        void main() {
+        vec2 uv = (gl_FragCoord.xy / uResolution.xy) * 2.0 - 1.0;
+        uv.y *= uResolution.y / uResolution.x;
+
+        float t = uTime * uSpeed;
+        float PI = 3.14159;
+        float sectors = max(uSides, 2.0);
+        float halfSector = sectors * 0.5;
+
+        // Kaleidoscopic symmetry
+        float angle = atan(uv.y, uv.x);
+        angle = abs(mod(angle, PI / halfSector) - PI / sectors);
+        uv = vec2(cos(angle), sin(angle)) * length(uv);
+
+        // Pattern grid animation
+        vec2 puv = uv + vec2(0.1, 0.05);
+        float ind = floor((uv.y + uv.x) * 6.0) + t * 0.1;
+        float g = mod(((uv.y + uv.x) * 6.0), 1.0);
+        
+        uv = vec2(uv.x + ind * 0.285, uv.y + uv.x) + t * 0.1;
+        uv *= uDensity;
+        uv = mod(uv, 2.5) - 1.25;
+        
+        puv = vec2(puv.x + ind * 0.285, puv.y + puv.x) + t * 0.1;
+        puv *= uDensity;
+        puv = mod(puv, 2.5) - 1.25;
+
+        // SDF distance fields
+        float d = sdfDon(uv);
+        float p = sdfDon(puv);
+        d = smoothstep(0.0, 0.02, d);
+        p = smoothstep(0.0, 0.01, p);
+
+        // Psychedelic palette with glass-like glow
+        vec3 fgColor = palette(-t + ind * 0.1) * g * 1.579 * uGlow;
+        vec3 bgColor = palette(-t + ind * 0.1) * g * 0.1;
+        if (g > 0.95) {
+            bgColor = mix(fgColor, palette(-t + uv.x + uv.y), 0.5);
+        }
+
+        vec3 color = mix(fgColor, bgColor, d);
+        color = mix(color * 2.0, color, p);
+        
+        // Glass-like contrast + HSV adjustment
+        color = (color - 0.5) * uContrast + 0.5;
+        vec3 hsv = rgb2hsv(color);
+        hsv.x += uHue / 360.0;
+        hsv.y *= uSaturation;
+        color = hsv2rgb(hsv);
+
+        gl_FragColor = vec4(color, 1.0);
+        }`;
+
+        const chargedCellsFragShader = `precision highp float;
+        uniform float uTime;
+        uniform vec2 uResolution;
+        uniform float uSpeed;
+        uniform float uScale;
+        uniform float uHue;
+        uniform float uSaturation;
+        uniform vec3 uColor1;
+        uniform vec3 uColor2;
+        uniform vec3 uColor3;
+
+        ${hueSatHelpers}
+
+        #define PI 3.14159
+
+        float hash1( float n ) { return fract(sin(n)*43758.5453); }
+        vec2  hash2( vec2  p ) {
+        p = vec2( dot(p,vec2(127.1,311.7)), dot(p,vec2(269.5,183.3)) );
+        return fract(sin(p)*43758.5453);
+        }
+
+        vec4 voronoi( in vec2 x, float w )
+        {
+        vec2 n = floor( x );
+        vec2 f = fract( x );
+
+        vec4 m = vec4( 8.0, 0.0, 0.0, 0.0 );
+        for( int j=-2; j<=2; j++ )
+        for( int i=-2; i<=2; i++ )
+        {
+            vec2 g = vec2( float(i),float(j) );
+            vec2 o = hash2( n + g );
+
+            // animate
+            o = 0.5 + 0.5*sin( uTime + 6.2831*o );
+
+            // distance to cell
+            float d = length(g - f + o);
+
+            // cell color
+            vec3 col = 0.5 + 0.5*sin(
+            hash1(dot(n+g,vec2(7.0,113.0)))*2.5 +
+            3.5 +
+            vec3(2.0,3.0,0.0)
+            );
+            col = col * col;
+
+            // smooth min
+            float h = smoothstep( -1.0, 1.0, (m.x-d)/w );
+            m.x   = mix( m.x,     d, h ) - h*(1.0-h)*w/(1.0+3.0*w);
+            m.yzw = mix( m.yzw, col, h ) - h*(1.0-h)*w/(1.0+3.0*w);
+        }
+
+        return m;
+        }
+
+        float random(vec2 co)
+        {
+        return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453);
+        }
+
+        float sdfGrid(vec2 uv, float r) {
+        vec2 c = uv * 4.0 * r;
+        float angle = r;
+        float thickness = 0.5 + r;
+        float one = abs(0.5 - mod(c.y + cos(angle) * c.x, 1.0)) * thickness;
+        float two = abs(0.5 - mod(c.y - cos(angle) * c.x, 1.0)) * thickness;
+        return min(one, two);
+        }
+
+        // 3‑stop palette: color1 -> color2 -> color3
+        vec3 paletteCharged(float t) {
+        t = clamp(t, 0.0, 1.0);
+        if (t < 0.5) {
+            float k = t / 0.5;
+            return mix(uColor1, uColor2, k);
+        } else {
+            float k = (t - 0.5) / 0.5;
+            return mix(uColor2, uColor3, k);
+        }
+        }
+
+        void main() {
+        vec2 uv = gl_FragCoord.xy / uResolution.xy * 2.0 - 1.0;
+        uv.y *= uResolution.y / uResolution.x;
+
+        float t = sin(uTime * 0.1 * uSpeed);
+
+        vec4 v = voronoi(uScale * uv, 0.5);
+        float r = pow(v.y, 0.5);
+
+        float d = 0.0;
+        d = max(sdfGrid(uv - t, r), d);
+        d = max(sdfGrid(uv + t, 1.0 - r), -d);
+        d = smoothstep(0.1, 0.15 + r * 0.1, d);
+
+        vec3 fgColor = paletteCharged(0.6 * r);
+        vec3 bgColor = paletteCharged(0.1 * r);
+
+        // Add a slight edge accent using d
+        vec3 edgeColor = paletteCharged(clamp(r + d * 0.5, 0.0, 1.0));
+        vec3 color = mix(fgColor, bgColor, d);
+        color = mix(color, edgeColor, 0.35);
+
+        vec3 hsv = rgb2hsv(color);
+        hsv.x += uHue / 360.0;
+        hsv.y *= uSaturation;
+        color = hsv2rgb(hsv);
+
+        gl_FragColor = vec4(color, 1.0);
+        }`;
+
+        // =========================================================================
+        // LOCALIZATION
+        // =========================================================================
+        const translations = {
+            en: {
+                appName: "Kerach Go",
+                controls: "Controls", shader: "Shader", palette: "Palette", mix: "Mix", brightness: "Brightness", language: "Language",
+                text: "Text", content: "Content", fontFamily: "Font Family", fontSize: "Font Size", fontWeight: "Font Weight", offsetX: "Offset X", offsetY: "Offset Y",
+                appearance: "Appearance", activeShader: "Active Shader", effects: "Effects", blurType: "Blur Type", blurStrength: "Blur Strength", blurAngle: "Blur Angle", noiseType: "Noise Type", noiseStrength: "Noise Strength",
+                melt: "Melt", flow: "Flow", balatro: "Balatro", glass: "Psychedelic Glass", chargedCells: "Charged Cells",
+                hue: "Hue Shift", saturation: "Saturation", contrast: "Contrast", zoom: "Zoom", speed: "Speed", detail: "Detail", velocity: "Velocity", twist: "Twist", colorOffset: "Color Offset",
+                lighting: "Lighting", spinAmount: "Spin Amount", pixelFilter: "Pixel Filter", rotateView: "Rotate View", sides: "Sides", density: "Density", glow: "Glow", scale: "Scale",
+                tintColor: "Tint Color", shaderColors: "Shader Colors", cellColors: "Cell Colors",
+                animation: "Animation", play: "Play", pause: "Pause", manualTime: "Manual Time",
+                config: "Config", export: "Export", import: "Import", exportConfig: "Export Config", importConfig: "Import Config", pasteJson: "Paste config JSON...",
+                baseColor: "Base Color", mode: "Mode", output: "Output", analogous: "Analogous", triad: "Triad", complementary: "Complementary", splitComp: "Split Complementary", square: "Square", tetradic: "Tetradic", monochromatic: "Monochromatic",
+                firstColor: "First Color", secondColor: "Second Color", steps: "Steps", mixMode: "Mix Mode", lighten: "Lighten", darken: "Darken", amount: "Amount",
+                contrastRatio: "Contrast Ratio", language: "Language", canvasBg: "Canvas Background",
+                creditTitle: "Credits", creditDescription: "The existence of this project wouldn't be possible without:",
+                poweredBy: "Powered by", apply: "Apply", contrast: "Contrast", creditTitle: "Credits & Info",
+                creditDescription: "The existence of this project wouldn't have been possible without the following:", none: "None",
+                gaussian: "Gaussian",
+                motion: "Motion",
+                zoom: "Zoom",
+            },
+            he: {
+                appName: "קרח Go",
+                controls: "בקרים", shader: "שיידר", palette: "פלטה", mix: "ערבוב", brightness: "בהירות", language: "שפה",
+                text: "טקסט", content: "תוכן", fontFamily: "גופן", fontSize: "גודל", fontWeight: "משקל", offsetX: "הזזה X", offsetY: "הזזה Y",
+                appearance: "מראה", activeShader: "שיידר פעיל", effects: "אפקטים", blurType: "סוג טשטוש", blurStrength: "עוצמת טשטוש", blurAngle: "זווית", noiseType: "סוג רעש", noiseStrength: "עוצמת רעש",
+                melt: "המסה", flow: "זרימה", balatro: "בלאטרו", glass: "זכוכית", chargedCells: "תאים טעונים",
+                hue: "גוון", saturation: "רוויה", contrast: "ניגודיות", zoom: "זום", speed: "מהירות", detail: "פירוט", velocity: "תאוצה", twist: "פיתול", colorOffset: "היסט צבע",
+                lighting: "תאורה", spinAmount: "סיבוב", pixelFilter: "פיקסול", rotateView: "סובב תצוגה", sides: "צלעות", density: "צפיפות", glow: "זוהר", scale: "קנה מידה",
+                tintColor: "צבע גוון", shaderColors: "צבעי שיידר", cellColors: "צבעי תאים",
+                animation: "אנימציה", play: "נגן", pause: "השהה", manualTime: "זמן ידני",
+                config: "הגדרות", export: "ייצוא", import: "ייבוא", exportConfig: "ייצא הגדרות", importConfig: "ייבא הגדרות", pasteJson: "הדבק JSON...",
+                baseColor: "צבע בסיס", mode: "מצב", output: "תוצאה", analogous: "אנלוגי", triad: "משולש", complementary: "משלים", splitComp: "משלים מפוצל", square: "ריבוע", tetradic: "טטרדי", monochromatic: "מונוכרומטי",
+                firstColor: "צבע ראשון", secondColor: "צבע שני", steps: "צעדים", mixMode: "מצב ערבוב", lighten: "הבהרה", darken: "הכהיה", amount: "כמות",
+                contrastRatio: "יחס ניגודיות", language: "שפה", canvasBg: "רקע קנבס",
+                creditTitle: "קרדיטים", creditDescription: "הפרויקט הזה לא היה מתאפשר ללא:",
+                poweredBy: "מופעל ע״י", apply: "החל", contrast: "ניגודיות", creditTitle: "קרדיטים ומידע",
+                creditDescription: "קיומו של הפרויקט הזה לא היה אפשרי בלעדי:", none: "ללא",
+                gaussian: "גאוסיאני",
+                motion: "תנועה",
+                zoom: "זום",
+            },
+            it: {
+                appName: "Kerach Go",
+                controls: "Controlli", shader: "Shader", palette: "Tavolozza", mix: "Miscela", brightness: "Luminosità", language: "Lingua",
+                text: "Testo", content: "Contenuto", fontFamily: "Carattere", fontSize: "Dimensione carattere", fontWeight: "Spessore carattere", offsetX: "Spostamento X", offsetY: "Spostamento Y",
+                appearance: "Aspetto", activeShader: "Shader attivo", effects: "Effetti", blurType: "Tipo di sfocatura", blurStrength: "Intensità sfocatura", blurAngle: "Angolo sfocatura", noiseType: "Tipo di rumore", noiseStrength: "Intensità rumore",
+                melt: "Fusione", flow: "Flusso", balatro: "Balatro", glass: "Vetro psichedelico", chargedCells: "Celle cariche",
+                hue: "Tonalità", saturation: "Saturazione", contrast: "Contrasto", zoom: "Zoom", speed: "Velocità", detail: "Dettaglio", velocity: "Velocità", twist: "Torsione", colorOffset: "Spostamento colore",
+                lighting: "Illuminazione", spinAmount: "Quantità di rotazione", pixelFilter: "Filtro pixel", rotateView: "Ruota vista", sides: "Lati", density: "Densità", glow: "Bagliore", scale: "Scala",
+                tintColor: "Colore tinta", shaderColors: "Colori shader", cellColors: "Colori celle",
+                animation: "Animazione", play: "Riproduci", pause: "Pausa", manualTime: "Tempo manuale",
+                config: "Configurazione", export: "Esporta", import: "Importa", exportConfig: "Esporta configurazione", importConfig: "Importa configurazione", pasteJson: "Incolla il JSON di configurazione...",
+                baseColor: "Colore base", mode: "Modalità", output: "Output", analogous: "Analoghi", triad: "Triade", complementary: "Complementare", splitComp: "Complementare diviso", square: "Quadrato", tetradic: "Tetradico", monochromatic: "Monocromatico",
+                firstColor: "Primo colore", secondColor: "Secondo colore", steps: "Passaggi", mixMode: "Modalità di fusione", lighten: "Schiarisci", darken: "Scurisci", amount: "Quantità",
+                contrastRatio: "Rapporto di contrasto", language: "Lingua", canvasBg: "Sfondo Canvas",
+                creditTitle: "Crediti", creditDescription: "L'esistenza di questo progetto non sarebbe possibile senza:",
+                poweredBy: "Creato con", apply: "Applica", contrast: "Contrasto", creditTitle: "Crediti e Info",
+                creditDescription: "L'esistenza di questo progetto non sarebbe stata possibile senza:", none: "Nessuno",
+                gaussian: "Gaussiano",
+                motion: "Movimento",
+                zoom: "Zoom",
+
+            },
+        }
+
+        const { useState, useEffect, useRef, useCallback, useMemo, createContext, useContext } = React;
+        const { motion, AnimatePresence } = window.Motion;
+
+        // =========================================================================
+        // UTILS & CONTEXT
+        // =========================================================================
+        const LanguageContext = React.createContext({
+            language: 'en',
+            dir: 'ltr',
+            t: (k) => k,
+            setLanguage: () => {},
+        });
+
+        const LanguageProvider = ({ children }) => {
+        const [language, setLanguage] = useState('en');
+
+        const dir = language === 'he' ? 'rtl' : 'ltr';
+
+        const t = useCallback((key) => {
+            const dict = translations[language] || translations.en;
+            return dict[key] || key;
+        }, [language]);
+
+        const value = { language, setLanguage, dir, t };
+
+        return (
+            <LanguageContext.Provider value={value}>
+            <div dir={dir}>{children}</div>
+            </LanguageContext.Provider>
+        );
+        };
+
+        const useLanguage = () => React.useContext(LanguageContext);
+        function cn(...classes) { return classes.filter(Boolean).join(' '); }
+        
+        // Helper: Adjust color brightness
+        function adjustColor(hex, percent) {
+            const num = parseInt(hex.slice(1), 16);
+            let r = (num >> 16) + Math.round(255 * percent);
+            let g = ((num >> 8) & 0x00FF) + Math.round(255 * percent);
+            let b = (num & 0x0000FF) + Math.round(255 * percent);
+            return "#" + (0x1000000 + (r<255?r<1?0:r:255)*0x10000 + (g<255?g<1?0:g:255)*0x100 + (b<255?b<1?0:b:255)).toString(16).slice(1);
+        }
+
+        // Helper: Convert [r,g,b] (0-1) to Hex
+        const rgbArrayToHex = (arr) => {
+            if (!arr) return "#000000";
+            return chroma.gl(arr[0], arr[1], arr[2]).hex();
+        };
+
+        // Helper: Convert Hex to [r,g,b] (0-1)
+        const hexToRgbArray = (hex) => {
+            if (!chroma.valid(hex)) return [0,0,0];
+            const gl = chroma(hex).gl();
+            return [gl[0], gl[1], gl[2]];
+        };
+
+        // =========================================================================
+        // UI COMPONENTS (From Nof Go)
+        // =========================================================================
+        const Icon = ({ name, size = 20, className }) => {
+            useEffect(() => window.lucide?.createIcons(), [name]);
+            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+        };
+
+        function FloatingLabelInput({ value, onChange, label }) {
+            const { dir } = useLanguage();
+            return (
+                <div className="relative mt-1" style={{ width: '120px' }}>
+                    <input type="text" value={value} onChange={e => onChange(e.target.value)} className="block bg-[#090909] border border-[#333] text-white rounded-lg px-4 pt-2.5 pb-2.5 focus:border-[#FFFFFF] outline-none peer transition-colors w-full text-xs" placeholder=" " style={{ direction: "ltr", textAlign: dir === 'rtl' ? 'right' : 'left' }} />
+                    <label className={`absolute text-xs text-gray-500 duration-300 transform -translate-y-4 scale-75 top-2 bg-[#090909] px-2 peer-focus:px-2 peer-focus:text-[#00A2FA] peer-placeholder-shown:scale-100 peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:top-1/2 peer-focus:top-2 peer-focus:scale-75 peer-focus:-translate-y-4 ${dir === 'rtl' ? 'right-2 origin-top-right' : 'left-2 origin-top-left'}`} style={{ borderRadius: '4px' }}>
+                        {label}
+                    </label>
+                </div>
+            );
+        }
+
+        const ColorPicker = ({ color, onChange }) => {
+            const { t, dir } = useLanguage();
+            const isRTL = dir === 'rtl';
+            const containerRef = React.useRef(null);
+            const [hue, setHue] = React.useState(0);
+            const [sat, setSat] = React.useState(100);
+            const [bright, setBright] = React.useState(100);
+            const [inputValue, setInputValue] = React.useState(color);
+            const displayedHue = hue;
+
+            React.useEffect(() => {
+                if (chroma.valid(color)) {
+                    const hsv = chroma(color).hsv();
+                    const newHue = isNaN(hsv[0]) ? 0 : hsv[0];
+                    setHue(newHue);
+                    setSat(hsv[1] * 100);
+                    setBright(hsv[2] * 100);
+                    setInputValue(color);
+                }
+            }, [color]);
+
+            const updateColor = React.useCallback((h, s, v) => {
+                const newColor = chroma.hsv(h, s / 100, v / 100).hex();
+                onChange(newColor);
+            }, [onChange]);
+
+            const handleAreaMouseDown = React.useCallback((e) => {
+                e.preventDefault();
+                const handleMove = (moveEvent) => {
+                    const rect = containerRef.current.getBoundingClientRect();
+                    let x = Math.max(0, Math.min((moveEvent.clientX - rect.left) / rect.width, 1));
+                    let y = Math.max(0, Math.min(1 - (moveEvent.clientY - rect.top) / rect.height, 1));
+                    const newSat = isRTL ? (1 - x) * 100 : x * 100;
+                    const newBright = y * 100;
+                    setSat(newSat);
+                    setBright(newBright);
+                    updateColor(hue, newSat, newBright);
+                };
+                const handleUp = () => {
+                    window.removeEventListener('mousemove', handleMove);
+                    window.removeEventListener('mouseup', handleUp);
+                };
+                window.addEventListener('mousemove', handleMove);
+                window.addEventListener('mouseup', handleUp);
+                handleMove(e);
+            }, [updateColor, hue, isRTL]);
+
+            const handleHueChange = (e) => {
+                const val = Number(e.target.value);
+                setHue(val);
+                updateColor(val, sat, bright);
+            };
+
+            const handleInputChange = (val) => {
+                setInputValue(val);
+                if (chroma.valid(val)) {
+                    onChange(val);
+                }
+            };
+
+            const contrast = chroma.contrast(chroma.valid(inputValue) ? inputValue : '#000', '#000');
+
+            return (
+                <div className="glass-panel rounded-squircle p-4 flex flex-col gap-4 w-full min-w-[300px]">
+                    <div ref={containerRef} onMouseDown={handleAreaMouseDown} className="relative w-full h-32 rounded-lg cursor-crosshair overflow-hidden" style={{ background: isRTL ? `linear-gradient(to left, #fff, hsl(${hue}, 100%, 50%)), linear-gradient(to top, #000, transparent)` : `linear-gradient(to right, #fff, hsl(${hue}, 100%, 50%)), linear-gradient(to top, #000, transparent)`, backgroundBlendMode: 'multiply' }}>
+                        <div className="absolute w-3 h-3 rounded-full border-2 border-white pointer-events-none transform -translate-x-1/2 -translate-y-1/2" style={{ left: isRTL ? `${100 - sat}%` : `${sat}%`, top: `${100 - bright}%` }} />
+                    </div>
+                    <input type="range" min="0" max="360" step="1" value={displayedHue} onChange={handleHueChange} className="w-full h-3 rounded-lg appearance-none cursor-pointer" style={{ background: isRTL ? 'linear-gradient(to left, red, yellow, lime, cyan, blue, magenta, red)' : 'linear-gradient(to left, red, magenta, blue, cyan, lime, yellow, red)' }} />
+                    <div className="flex items-center justify-between gap-2">
+                        <FloatingLabelInput value={inputValue} onChange={handleInputChange} label="HEX" />
+                        <div className="flex flex-col items-end gap-1">
+                            <span className="text-[10px] text-gray-400 uppercase tracking-wider">{t('contrast')}</span>
+                            <div className={`text-[10px] px-1.5 py-0.5 rounded-full border ${ contrast >= 4.5 ? 'bg-blue-950 border-blue-800 text-blue-400' : 'bg-red-950/30 border-red-900/30 text-gray-500' }`}>
+                                {contrast >= 7 ? 'AAA' : (contrast >= 4.5 ? 'AA' : 'XX')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        function CustomSlider({
+            id,
+            min = 0,
+            max = 100,
+            step = 1,
+            value,
+            onValueChange,
+            disabled = false,
+            trackHeight = '8px',
+            thumbWidth = '20px',
+            thumbHeight = '20px',
+            width = '100%',
+            trackFillBorderRadius = '8px',
+            thumbBorderRadius = '50%',
+            thumbBorderWidth = '2px',
+            ariaLabel = 'slider',
+            isRTL = false,
+            keyStep = 1,
+        }) {
+            const sliderRef = useRef(null);
+            const [isDragging, setIsDragging] = useState(false);
+            const [isFocused, setIsFocused] = useState(false);
+            const [isHovered, setIsHovered] = useState(false);
+
+            const baseFill = '#00a2fa';
+            const ringBackground = '#111';
+            const ringOutlineDefault = adjustColor(baseFill, -0.1);
+            const ringOutlineHovered = adjustColor(baseFill, 0.1);
+            const ringOutlineActive = '#ffffff'; // pure white when active
+            const fillHovered = adjustColor(baseFill, 0.1);
+            const fillActive = adjustColor(baseFill, 0.2);
+
+            const getPercentage = useCallback(() => {
+                return ((value - min) / (max - min)) * 100;
+            }, [value, min, max]);
+
+            const handleInteraction = useCallback(
+                (clientX) => {
+                if (disabled || !sliderRef.current) return;
+                const rect = sliderRef.current.getBoundingClientRect();
+                let percentage;
+                if (isRTL) {
+                    percentage = ((rect.right - clientX) / rect.width) * 100;
+                } else {
+                    percentage = ((clientX - rect.left) / rect.width) * 100;
+                }
+                percentage = Math.max(0, Math.min(100, percentage));
+                let newValue = min + (percentage / 100) * (max - min);
+                if (step !== 0) newValue = Math.round(newValue / step) * step;
+                newValue = Math.max(min, Math.min(max, newValue));
+                onValueChange(newValue);
+                },
+                [disabled, min, max, step, onValueChange, isRTL]
+            );
+
+            const handleMouseDown = (e) => {
+                if (disabled) return;
+                setIsDragging(true);
+                handleInteraction(e.clientX);
+                sliderRef.current?.focus();
+            };
+
+            const handleMouseMove = useCallback(
+                (e) => {
+                if (isDragging) handleInteraction(e.clientX);
+                },
+                [isDragging, handleInteraction]
+            );
+
+            const handleMouseUp = useCallback(() => {
+                setIsDragging(false);
+            }, []);
+
+            useEffect(() => {
+                window.addEventListener('mousemove', handleMouseMove);
+                window.addEventListener('mouseup', handleMouseUp);
+                return () => {
+                window.removeEventListener('mousemove', handleMouseMove);
+                window.removeEventListener('mouseup', handleMouseUp);
+                };
+            }, [handleMouseMove, handleMouseUp]);
+
+            const handleKeyDown = (e) => {
+                if (disabled) return;
+
+                if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                const direction = (e.key === 'ArrowRight' ? 1 : -1) * (isRTL ? -1 : 1);
+                const increment = keyStep || step;
+                const newValue = Math.max(min, Math.min(max, value + direction * increment));
+                onValueChange(newValue);
+                }
+            };
+
+            const percentage = getPercentage();
+            const fillColor = isFocused ? fillActive : isHovered ? fillHovered : baseFill;
+            const thumbColor = ringBackground;
+
+            let thumbBorderColor;
+            if (isFocused) thumbBorderColor = ringOutlineActive;
+            else if (isHovered) thumbBorderColor = ringOutlineHovered;
+            else thumbBorderColor = ringOutlineDefault;
+
+            return (
+                <div
+                style={{
+                    position: 'relative',
+                    width,
+                    height: thumbHeight,
+                    display: 'flex',
+                    alignItems: 'center',
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                    touchAction: 'none',
+                    outline: 'none', // remove white outline glow
+                }}
+                ref={sliderRef}
+                onMouseDown={handleMouseDown}
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setIsFocused(false)}
+                onKeyDown={handleKeyDown}
+                tabIndex={disabled ? -1 : 0}
+                role="slider"
+                aria-valuenow={value}
+                dir={isRTL ? 'rtl' : 'ltr'}
+                >
+                <div
+                    style={{
+                    position: 'absolute',
+                    height: trackHeight,
+                    borderRadius: trackFillBorderRadius,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: '100%',
+                    backgroundColor: 'rgba(255,255,255,0.1)',
+                    }}
+                />
+                <div
+                    style={{
+                    position: 'absolute',
+                    height: trackHeight,
+                    borderRadius: trackFillBorderRadius,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: `${percentage}%`,
+                    backgroundColor: fillColor,
+                    }}
+                />
+                <div
+                    style={{
+                    position: 'absolute',
+                    width: thumbWidth,
+                    height: thumbHeight,
+                    borderRadius: thumbBorderRadius,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    backgroundColor: thumbColor,
+                    border: `${thumbBorderWidth} solid ${thumbBorderColor}`,
+                    [isRTL ? 'right' : 'left']: `calc(${percentage}% - ${
+                        parseInt(thumbWidth) / 2
+                    }px)`,
+                    transition: 'border-color 0.3s',
+                    }}
+                />
+                </div>
+            );
+        }
+
+        const ShaderSlider = ({ label, value, min, max, step, update, dir }) => (
+        <div>
+            <label className="text-xs text-gray-400 flex justify-between">
+            <span>{label}</span>
+            <span className="text-accent">
+                {typeof value === 'number' ? value.toFixed(2) : value}
+            </span>
+            </label>
+            <CustomSlider
+            value={value}
+            min={min}
+            max={max}
+            step={step}
+            onValueChange={update}
+            isRTL={dir === 'rtl'}
+            />
+        </div>
+        );
+
+        const ColorCard = ({ hex, label }) => {
+            const { t, dir } = useLanguage();
+            const [copied, setCopied] = useState(false);
+            const contrast = useMemo(() => { try { return chroma.contrast(hex, '#000'); } catch { return 0; } }, [hex]);
+            
+            const handleCopy = () => {
+                navigator.clipboard.writeText(hex.toUpperCase());
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            };
+
+            return (
+                <motion.div 
+                    layout
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="min-w-[236px] glass-panel rounded-squircle p-3 flex flex-col gap-3 transition-transform hover:border-[#242424]"
+                >
+                    <div className="relative h-20 w-full rounded-xl overflow-hidden border border-white/10" style={{ backgroundColor: hex }}>
+                        {label && <span className="absolute top-2 left-2 bg-black/60 backdrop-blur-md text-[10px] px-2 py-0.5 rounded text-white">{label}</span>}
+                    </div>
+                    
+                    <div className="flex justify-between items-center">
+                        <code className="text-xs font-mono text-gray-300">{hex.toUpperCase()}</code>
+                        <button onClick={handleCopy} className="p-1.5 bg-white/5 hover:bg-[#242424] rounded-lg transition-colors text-gray-300 hover:text-white">
+                            {copied ? <Icon name="check" size={14} className="text-green-400"/> : <Icon name="copy" size={14}/>}
+                        </button>
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-2 border-t border-white/5">
+                        <div className="w-8 h-8 flex items-center justify-center rounded-lg font-bold text-white text-sm border border-white/10 shadow-inner" style={{ backgroundColor: hex }}>
+                            {dir === 'rtl' ? 'ל' : 'A'}
+                        </div>
+                        <div className="flex flex-col w-full">
+                            <div className="flex justify-between w-full">
+                                <span className="text-[10px] text-gray-500">{t('contrastRatio')}:</span>
+                                <span className="text-xs font-mono font-bold">{contrast.toFixed(2)}</span>
+                            </div>
+                            <div className="flex gap-2 mt-1">
+                                <span className={`text-[9px] px-1.5 rounded border flex items-center ${contrast >= 4.5 ? 'border-green-800 bg-green-950 text-green-400' : 'border-gray-800 text-gray-600'}`}>
+                                    <span className={`badge-icon ${contrast >= 4.5 ? 'badge-check' : 'badge-cross'}`}></span> AA
+                                </span>
+                                <span className={`text-[9px] px-1.5 rounded border flex items-center ${contrast >= 7 ? 'border-green-800 bg-green-950 text-green-400' : 'border-gray-800 text-gray-600'}`}>
+                                    <span className={`badge-icon ${contrast >= 7 ? 'badge-check' : 'badge-cross'}`}></span> AAA
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </motion.div>
+            );
+        };
+
+        const creditsMarkdown = `
+[Color Picker](https://21st.dev/community/components/uplusion23/color-picker/color-picker-with-swatches-and-onchange) by [Trevor McIntire](https://21st.dev/community/uplusion23)
+
+[vue-color-wheel](https://vue-color-wheel.vercel.app/) by [Robert Shaw](https://github.com/xiaoluoboding)
+
+[Chronicle Button](https://codepen.io/Haaguitos/pen/OJrVZdJ) by [Haaguitos](https://codepen.io/Haaguitos)
+
+[すりガラスなプロフィールカード](https://codepen.io/ash_creator/pen/zYaPZLB) by [あしざわ - Webクリエイター](https://codepen.io/ash_creator)
+
+[react@18](https://unpkg.com/react@18/umd/react.production.min.js)
+
+[react-dom@18](https://unpkg.com/react-dom@18/umd/react-dom.production.min.js)
+
+[babel](https://unpkg.com/@babel/standalone/babel.min.js)
+
+[framer-motion](https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js)
+
+[chroma-js](https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.4.2/chroma.min.js)
+    
+[lucide](https://unpkg.com/lucide@latest)
+
+[radix-ui](https://www.npmjs.com/package/radix-ui)
+
+[Input Floating Label animation](https://codepen.io/Mahe76/pen/qBQgXyK) by [Elpeeda](https://codepen.io/Mahe76)
+
+[GradientGen](https://github.com/noegarsoux/GradientGen) by [noegarsoux](https://github.com/noegarsoux)
+
+[Balatro Background Shaders](https://www.shadertoy.com/view/XXtBRr) by [xxidbr9](https://www.shadertoy.com/user/xxidbr9)
+
+[Non liquid glass](https://codepen.io/lekzd/pen/dPGYjdj) by [Alexander Korotaev](https://codepen.io/lekzd)
+
+[Floating voronoi lines](https://codepen.io/lekzd/pen/xbwMMzR) by [Alexander Korotaev](https://codepen.io/lekzd)
+        `;
+
+        function CreditHighlightHover({ children, href, className }) {
+        const baseClass =
+            "relative inline-block px-0.5 transition-colors duration-200 " +
+            (href
+            ? "font-medium text-accent hover:text-white cursor-pointer no-underline"
+            : "text-gray-400");
+
+        if (href) {
+            return (
+            <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={
+                baseClass + (className ? ` ${className}` : "") + " link-underline"
+                }
+            >
+                {children}
+                <span className="absolute bottom-0 left-0 h-[1px] w-0 bg-accent transition-all duration-300 hover:w-full hover:bg-white" />
+            </a>
+            );
+        }
+
+        return (
+            <span className={baseClass + (className ? ` ${className}` : "")}>
+            {children}
+            </span>
+        );
+        }
+
+        function renderEntry(entry) {
+        const regex = /\[([^\]]+)\]\(([^)]+)\)/g;
+        const parts = [];
+        let lastIndex = 0;
+        let match;
+        let key = 0;
+
+        while ((match = regex.exec(entry)) !== null) {
+            if (match.index > lastIndex) {
+            const text = entry.slice(lastIndex, match.index);
+            if (text)
+                parts.push(<CreditHighlightHover key={key++}>{text}</CreditHighlightHover>);
+            }
+            parts.push(
+            <CreditHighlightHover key={key++} href={match[2]}>
+                {match[1]}
+            </CreditHighlightHover>
+            );
+            lastIndex = regex.lastIndex;
+        }
+
+        if (lastIndex < entry.length) {
+            parts.push(<CreditHighlightHover key={key++}>{entry.slice(lastIndex)}</CreditHighlightHover>);
+        }
+
+        return parts;
+        }
+
+        const Credits = () => {
+        const creditEntries = creditsMarkdown
+            .trim()
+            .split(/\n/)
+            .map((e) => e.trim())
+            .filter(Boolean);
+
+        return (
+            <div>
+
+            <div className="space-y-1">
+                {creditEntries.map((entry, i) => (
+                <p key={i}>{renderEntry(entry)}</p>
+                ))}
+            </div>
+                <div
+                className="mt-8 pt-4 border-t border-gray-700 text-center text-sm text-gray-400"
+                dir="ltr"
+                >
+                    <a
+                        href="https://sourceforge.net/projects/kerach-go/"
+                        target="_blank"
+                        className="text-accent hover:text-white hover:underline transition-colors"
+                    >
+                        SourceForge
+                    </a>
+                    {" "}
+                    <a
+                        href="https://github.com/Northstrix/kerach-go"
+                        target="_blank"
+                        className="text-accent hover:text-white hover:underline transition-colors"
+                    >
+                        GitHub
+                    </a>
+                </div>
+                <div
+                className="pt-4 text-center text-sm text-gray-400"
+                dir="ltr"
+                >
+                    Made by{" "}
+                    <a
+                        href="https://maxim-bortnikov.netlify.app/"
+                        target="_blank"
+                        className="text-accent hover:text-white hover:underline transition-colors"
+                    >
+                        Maxim Bortnikov
+                    </a>{" "}
+                    using{" "}
+                    <a
+                        href="https://nextjs.org"
+                        target="_blank"
+                        className="text-accent hover:text-white hover:underline transition-colors"
+                    >
+                        Next.js
+                    </a>
+                    ,{" "}
+                    <a
+                        href="https://www.perplexity.ai"
+                        target="_blank"
+                        className="text-accent hover:text-white hover:underline transition-colors"
+                    >
+                        Perplexity
+                    </a>
+                    ,{" "}
+                    <a
+                        href="https://firebase.studio"
+                        target="_blank"
+                        className="text-accent hover:text-white hover:underline transition-colors"
+                    >
+                        Firebase Studio
+                    </a>
+                    , and{" "}
+                    <a
+                        href="https://aistudio.google.com"
+                        target="_blank"
+                        className="text-accent hover:text-white hover:underline transition-colors"
+                    >
+                        Google AI Studio
+                    </a>
+                    .
+                </div>
+            </div>
+        );
+        };
+
+        function StaticSelect({ options, selectedValue, onChange, label }) {
+            const { t, dir } = useLanguage();
+            const isRTL = dir === 'rtl';
+            return (
+                <div>
+                    {label && <label className="text-xs text-gray-500 font-bold uppercase tracking-widest mb-3 block">{label}</label>}
+                    <div className="glass-panel bg-black/50 border border-white/10 rounded-lg overflow-y-auto" style={{ textAlign: isRTL ? 'right' : 'left' }}>
+                        {options.map(opt => (
+                            <button key={opt.value} onClick={() => onChange(opt.value)} className={`w-full px-2.5 py-1.5 text-[14px] rounded transition-colors focus:outline-none flex items-center ${opt.value === selectedValue ? "bg-accent text-black font-semibold" : "text-gray-300 hover:bg-white/10"}`} style={{ direction: isRTL ? 'rtl' : 'ltr', justifyContent: 'flex-start' }}>
+                                {t(opt.label || opt.value)}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        function NamerUiBadge({ 
+            href = "https://namer-ui.vercel.app/", 
+            isRTL = false, 
+            isMobile = false, 
+            poweredByText = "Powered by", 
+            namerUIName = "Namer UI" 
+        }) {
+            const [isHovered, setIsHovered] = React.useState(false);
+            return (
+                <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                dir={isRTL ? "rtl" : "ltr"}
+                className="inline-flex flex-col rounded-squircle select-none"
+                style={{
+                    background: isHovered ? "#141414" : "#111",
+                    border: `1px solid ${isHovered ? "#303030" : "#242424"}`,
+                    padding: isMobile ? "8px 16px 16px 16px" : "16px 24px 24px 24px",
+                    userSelect: "none",
+                    maxWidth: "max-content",
+                    textAlign: isRTL ? "right" : "left",
+                    transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+                >
+                <span
+                    className="text-[var(--sub-foreground)] text-[12px] mb-2"
+                    style={{ userSelect: "none" }}
+                >
+                    {poweredByText}
+                </span>
+                <div
+                    className="inline-flex items-center gap-3"
+                    style={{
+                    justifyContent: isRTL ? "flex-end" : "flex-start",
+                    }}
+                >
+                    <img
+                    src="namer-ui-logo.png"
+                    alt={namerUIName}
+                    width={32}
+                    height={32}
+                    style={{ objectFit: "contain", display: "inline-block" }}
+                    />
+                    <span
+                    className="font-bold text-base text-[var(--foreground)] select-none"
+                    dir={isRTL ? "rtl" : "ltr"}
+                    >
+                    {namerUIName}
+                    </span>
+                </div>
+                </a>
+            );
+        };
+
+        // =========================================================================
+        // SHADER LOGIC (KERACH PORT)
+        // =========================================================================
+        const modifyShaderWithMask = (shaderSource) => {
+            const headerInjection = `varying vec2 vUv; uniform sampler2D u_mask;`;
+            const mainInjection = `void main() { vec4 mask = texture2D(u_mask, vUv); if(mask.r < 0.1) discard;`;
+            let modified = shaderSource;
+            if (modified.includes('precision highp float;')) {
+                modified = modified.replace('precision highp float;', 'precision highp float;\n' + headerInjection);
+            } else {
+                modified = headerInjection + '\n' + modified;
+            }
+            modified = modified.replace(/void\s+main\s*\(\s*\)\s*{/, mainInjection);
+            return modified;
+        };
+
+        const ShaderPreview = ({ settings, canvasBg }) => {
+            const canvasRef = useRef(null);
+            const containerRef = useRef(null);
+            // Three.js Refs
+            const rendererRef = useRef(null);
+            const sceneRef = useRef(null);
+            const cameraRef = useRef(null);
+            const mainMeshRef = useRef(null);
+            const materialRef = useRef(null);
+            const textCanvasRef = useRef(null);
+            const textTextureRef = useRef(null);
+            const settingsRef = useRef(settings);
+            const activeShaderRef = useRef(settings.activeShader);
+
+            useEffect(() => { settingsRef.current = settings; }, [settings]);
+
+            // Font Helper
+            const getCanvasFont = (fontFamily, fontWeight, fontSize) => {
+                return `${fontWeight} ${fontSize}px ${fontFamily}, sans-serif`;
+            };
+
+            // Text Texture Generation
+            const updateTextTexture = useCallback(() => {
+                const textCanvas = textCanvasRef.current;
+                const texture = textTextureRef.current;
+                const container = containerRef.current;
+                const currentSettings = settingsRef.current;
+                if (!textCanvas || !texture || !currentSettings || !container) return;
+                const ctx = textCanvas.getContext("2d", { willReadFrequently: true });
+                if (!ctx) return;
+                const dpr = window.devicePixelRatio || 1;
+                const width = container.clientWidth * dpr;
+                const height = container.clientHeight * dpr;
+                if (textCanvas.width !== width || textCanvas.height !== height) { 
+                    textCanvas.width = width; 
+                    textCanvas.height = height; 
+                } else { 
+                    ctx.clearRect(0, 0, width, height); 
+                }
+                const fontSize = currentSettings.fontSize * dpr;
+                ctx.font = getCanvasFont(currentSettings.fontFamily || "Inter", currentSettings.fontWeight, fontSize);
+                ctx.imageSmoothingEnabled = false;
+                ctx.fillStyle = "#ffffff";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                const lines = currentSettings.text.split("\n");
+                const lineSpacing = 1.2;
+                const totalTextHeight = fontSize * lines.length * lineSpacing;
+                const startY = (height - totalTextHeight) / 2 + (fontSize * lineSpacing / 2);
+                const translateX = currentSettings.textTranslateX * dpr;
+                const translateY = currentSettings.textTranslateY * dpr;
+                const centerX = width / 2;
+                lines.forEach((line, index) => {
+                    const y = startY + (index * fontSize * lineSpacing) + translateY;
+                    const x = centerX + translateX;
+                    ctx.fillText(line, x, y);
+                });
+                texture.minFilter = THREE.NearestFilter;
+                texture.magFilter = THREE.NearestFilter;
+                texture.needsUpdate = true;
+                if (materialRef.current) { 
+                    materialRef.current.uniforms.u_mask.value = texture; 
+                }
+            }, []);
+
+            // Material Factory
+            const createMaterialForType = (type, maskTexture) => {
+                let baseFragment = meltFragShader;
+                let uniforms = {
+                    uTime: { value: 0 },
+                    uResolution: { value: new THREE.Vector2() },
+                    u_mask: { value: maskTexture },
+                    uHue: { value: 0.0 },
+                    uSaturation: { value: 1.0 },
+                    uContrast: { value: 1.0 },
+                };
+
+                if (type === 'balatro') {
+                    baseFragment = balatroFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 1.0 },
+                        uSpinRotation: { value: -2.0 },
+                        uSpinSpeed: { value: 7.0 },
+                        uColor1: { value: new THREE.Vector3(0.87, 0.26, 0.23) },
+                        uColor2: { value: new THREE.Vector3(0.0, 0.42, 0.70) },
+                        uColor3: { value: new THREE.Vector3(0.08, 0.13, 0.14) },
+                        uLighting: { value: 0.4 },
+                        uSpinAmount: { value: 0.25 },
+                        uPixelFilter: { value: 745.0 },
+                        uSpinEase: { value: 1.0 },
+                        uIsRotate: { value: false },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                        uContrast: { value: 1.0 },
+                    });
+                } else if (type === 'glass') {
+                    baseFragment = psychedelicGlassFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 0.8 },
+                        uSides: { value: 6.0 },
+                        uDensity: { value: 15.0 },
+                        uGlow: { value: 1.2 },
+                    });
+                } else if (type === 'flow') {
+                    baseFragment = flowFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 2.5 },
+                        uVelocity: { value: 0.2 },
+                        uDetail: { value: 200.0 },
+                        uTwist: { value: 50.0 },
+                        uRgbMultiplierR: { value: 1.0 },
+                        uRgbMultiplierG: { value: 1.0 },
+                        uRgbMultiplierB: { value: 1.0 },
+                        uColorOffset: { value: 0.0 },
+                    });
+                } else if (type === 'chargedCells') {
+                    baseFragment = chargedCellsFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 1.0 },
+                        uScale: { value: 5.0 },
+                        uColor1: { value: new THREE.Vector3(0.18, 0.7, 0.4) },
+                        uColor2: { value: new THREE.Vector3(0.58, 1.0, 0.15) },
+                        uColor3: { value: new THREE.Vector3(0.0, 0.65, 0.31) },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                        uContrast: { value: 1.0 },
+                    });
+                } else {
+                    baseFragment = meltFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 0.5 },
+                        uZoom: { value: 1.0 },
+                        uDetail: { value: 0.2 },
+                    });
+                }
+
+                const finalFragment = modifyShaderWithMask(baseFragment);
+                return new THREE.ShaderMaterial({
+                    vertexShader: vertexShader,
+                    fragmentShader: finalFragment,
+                    uniforms: uniforms,
+                    transparent: true,
+                });
+            };
+
+            // Initialization
+            useEffect(() => {
+                if (!canvasRef.current || !containerRef.current) return;
+                const canvas = canvasRef.current;
+                const container = containerRef.current;
+                const dpr = window.devicePixelRatio;
+
+                // Text Texture
+                const textCanvas = document.createElement("canvas");
+                textCanvasRef.current = textCanvas;
+                const texture = new THREE.CanvasTexture(textCanvas);
+                texture.minFilter = THREE.NearestFilter;
+                texture.magFilter = THREE.NearestFilter;
+                textTextureRef.current = texture;
+
+                // Renderer
+                const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true });
+                renderer.setPixelRatio(dpr);
+                renderer.setClearColor(0x000000, 0); 
+                rendererRef.current = renderer;
+
+                // Main Scene
+                const scene = new THREE.Scene();
+                sceneRef.current = scene;
+                const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+                cameraRef.current = camera;
+                const geometry = new THREE.PlaneGeometry(2, 2);
+                
+                const material = createMaterialForType(settings.activeShader, texture);
+                materialRef.current = material;
+                const mainMesh = new THREE.Mesh(geometry, material);
+                mainMeshRef.current = mainMesh;
+                scene.add(mainMesh);
+
+                updateTextTexture();
+
+                return () => {
+                    renderer.dispose();
+                    texture.dispose();
+                    geometry.dispose();
+                    material.dispose();
+                };
+            }, []);
+
+            // Shader change
+            useEffect(() => {
+                if (activeShaderRef.current !== settings.activeShader) {
+                    activeShaderRef.current = settings.activeShader;
+                    const oldMat = materialRef.current;
+                    const newMat = createMaterialForType(settings.activeShader, textTextureRef.current);
+                    if (mainMeshRef.current) mainMeshRef.current.material = newMat;
+                    materialRef.current = newMat;
+                    if (oldMat) oldMat.dispose();
+                }
+            }, [settings.activeShader]);
+
+            useEffect(() => { updateTextTexture(); }, [settings.text, settings.fontSize, settings.fontWeight, settings.fontFamily, settings.textTranslateX, settings.textTranslateY, updateTextTexture]);
+
+            // Main render loop - SIMPLIFIED (no overlay pass)
+            useEffect(() => {
+                let animationFrameId;
+                const animate = (time) => {
+                    if (!settingsRef.current || !containerRef.current || !rendererRef.current) {
+                        animationFrameId = requestAnimationFrame(animate);
+                        return;
+                    }
+
+                    const renderer = rendererRef.current;
+                    const { clientWidth, clientHeight } = containerRef.current;
+                    const dpr = window.devicePixelRatio;
+
+                    if (renderer.getSize(new THREE.Vector2()).x !== clientWidth * dpr) {
+                        renderer.setSize(clientWidth, clientHeight, false);
+                        updateTextTexture();
+                    }
+
+                    const now = time * 0.001;
+                    const cur = settingsRef.current;
+                    const elapsed = cur.isFrozen ? cur.manualTime : now;
+
+                    if (materialRef.current) {
+                        const mat = materialRef.current;
+                        if (mat.uniforms.uTime) mat.uniforms.uTime.value = elapsed;
+                        if (mat.uniforms.uResolution)
+                            mat.uniforms.uResolution.value.set(clientWidth * dpr, clientHeight * dpr);
+
+                        // Update based on active shader
+                        if (cur.activeShader === 'melt') {
+                            mat.uniforms.uZoom.value = cur.melt.zoom;
+                            mat.uniforms.uSpeed.value = cur.melt.speed;
+                            mat.uniforms.uDetail.value = cur.melt.detail;
+                            mat.uniforms.uHue.value = cur.melt.hue;
+                            mat.uniforms.uSaturation.value = cur.melt.saturation;
+                            mat.uniforms.uContrast.value = cur.melt.contrast;
+
+                        } else if (cur.activeShader === 'flow') {
+                            mat.uniforms.uSpeed.value = cur.flow.speed;
+                            mat.uniforms.uVelocity.value = cur.flow.velocity;
+                            mat.uniforms.uDetail.value = cur.flow.detail;
+                            mat.uniforms.uTwist.value = cur.flow.twist;
+                            mat.uniforms.uContrast.value = cur.flow.contrast;
+                            mat.uniforms.uRgbMultiplierR.value = cur.flow.rgbR;
+                            mat.uniforms.uRgbMultiplierG.value = cur.flow.rgbG;
+                            mat.uniforms.uRgbMultiplierB.value = cur.flow.rgbB;
+                            mat.uniforms.uColorOffset.value = cur.flow.colorOffset;
+                            mat.uniforms.uHue.value = cur.flow.hue;
+                            mat.uniforms.uSaturation.value = cur.flow.saturation;
+
+                        } else if (cur.activeShader === 'balatro') {
+                            mat.uniforms.uSpeed.value = cur.balatro.speed;
+                            mat.uniforms.uSpinRotation.value = cur.balatro.spinRotation;
+                            mat.uniforms.uSpinSpeed.value = cur.balatro.spinSpeed;
+                            mat.uniforms.uContrast.value = cur.balatro.contrast;
+                            mat.uniforms.uLighting.value = cur.balatro.lighting;
+                            mat.uniforms.uSpinAmount.value = cur.balatro.spinAmount;
+                            mat.uniforms.uPixelFilter.value = cur.balatro.pixelFilter;
+                            mat.uniforms.uSpinEase.value = cur.balatro.spinEase;
+                            mat.uniforms.uIsRotate.value = cur.balatro.isRotate;
+                            mat.uniforms.uColor1.value.set(...cur.balatro.color1);
+                            mat.uniforms.uColor2.value.set(...cur.balatro.color2);
+                            mat.uniforms.uColor3.value.set(...cur.balatro.color3);
+                            mat.uniforms.uHue.value = cur.balatro.hue;
+                            mat.uniforms.uSaturation.value = cur.balatro.saturation;
+                            mat.uniforms.uContrast.value = cur.balatro.contrast;
+
+                        } else if (cur.activeShader === 'glass') {
+                            mat.uniforms.uSpeed.value = cur.glass.speed;
+                            mat.uniforms.uSides.value = cur.glass.sides;
+                            mat.uniforms.uHue.value = cur.glass.hue;
+                            mat.uniforms.uSaturation.value = cur.glass.saturation;
+                            mat.uniforms.uContrast.value = cur.glass.contrast;
+                            mat.uniforms.uDensity.value = cur.glass.density;
+                            mat.uniforms.uGlow.value = cur.glass.glow;
+
+                        } else if (cur.activeShader === 'chargedCells') {
+                            mat.uniforms.uSpeed.value = cur.chargedCells.speed;
+                            mat.uniforms.uScale.value = cur.chargedCells.scale;
+                            mat.uniforms.uHue.value = cur.chargedCells.hue;
+                            mat.uniforms.uSaturation.value = cur.chargedCells.saturation;
+                            mat.uniforms.uContrast.value = cur.chargedCells.contrast;
+                            mat.uniforms.uColor1.value.set(...cur.chargedCells.color1);
+                            mat.uniforms.uColor2.value.set(...cur.chargedCells.color2);
+                            mat.uniforms.uColor3.value.set(...cur.chargedCells.color3);
+                        }
+                    }
+
+                    // SINGLE RENDER PASS
+                    if (sceneRef.current && cameraRef.current) {
+                        renderer.setRenderTarget(null);
+                        renderer.clear();
+                        renderer.render(sceneRef.current, cameraRef.current);
+                    }
+
+                    animationFrameId = requestAnimationFrame(animate);
+                };
+
+                animationFrameId = requestAnimationFrame(animate);
+                return () => cancelAnimationFrame(animationFrameId);
+            }, []);
+
+            return (
+                <div 
+                    ref={containerRef} 
+                    className="absolute inset-0 w-full h-full overflow-hidden"
+                    style={{ 
+                        background: canvasBg,
+                        // CSS BLUR applies to ENTIRE canvas (controls unaffected)
+                        ...(settings.blurType !== 'none' && {
+                            filter: `blur(${settings.blurStrength}px)`,
+                            WebkitFilter: `blur(${settings.blurStrength}px)`
+                        })
+                    }}
+                >
+                    <canvas ref={canvasRef} className="block w-full h-full" />
+                </div>
+            );
+        };
+
+        const App = () => {
+            const { t, setLanguage, dir, language } = useLanguage();
+            const [activeTab, setActiveTab] = useState('controls');
+            
+            // Kerach Settings
+            const defaultSettings = {
+                text: "Kerach", fontSize: 250, fontWeight: 600, fontFamily: "Quicksand", textTranslateX: 0, textTranslateY: 0,
+                activeShader: 'melt',
+                melt: { hue: 0, saturation: 1.0, zoom: 7.60, speed: 0.5, detail: 0.2, contrast: 1.0 },
+                flow: { velocity: 0.2, detail: 200.0, twist: 50.0, speed: 2.5, contrast: 1.0, rgbR: 1.0, rgbG: 1.0, rgbB: 1.0, colorOffset: 0.0, hue: 0, saturation: 1.0 },
+                balatro: { speed: 1, spinRotation: -2.0, spinSpeed: 7.0, contrast: 3.5, lighting: 0.4, spinAmount: 0.25, pixelFilter: 745.0, spinEase: 1.0, isRotate: false, color1: [0.871, 0.267, 0.231], color2: [0.0, 0.42, 0.706], color3: [0.086, 0.137, 0.145] },
+                glass: { speed: 0.8, sides: 6, hue: 0, saturation: 1, contrast: 1, density: 15.0, glow: 1.2 },
+                chargedCells: { speed: 1.0, scale: 5.0, hue: 0, saturation: 1, color1: [0.18, 0.7, 0.4], color2: [0.58, 1.0, 0.15], color3: [0.0, 0.65, 0.31] },
+                blurStrength: 0.0,
+            };
+            const [settings, setSettings] = useState(defaultSettings);
+            const [canvasBg, setCanvasBg] = useState("#000000");
+
+            // Nof Go Settings
+            const [baseColor, setBaseColor] = useState("#00A2FA");
+            const [harmony, setHarmony] = useState("analogous");
+            const [mix1, setMix1] = useState("#00A2FA");
+            const [mix2, setMix2] = useState("#FA00A2");
+            const [mixMode, setMixMode] = useState("rgb");
+            const [mixSteps, setMixSteps] = useState(5);
+            const [brightBase, setBrightBase] = useState("#00A2FA");
+            const [brightMode, setBrightMode] = useState("lighten");
+            const [brightSteps, setBrightSteps] = useState(6);
+
+            // Computed Nof Go
+            const harmonies = useMemo(() => {
+                if (!chroma.valid(baseColor)) return [];
+                const c = chroma(baseColor);
+                const h = c.get('hsl.h'), s = c.get('hsl.s'), l = c.get('hsl.l');
+                const hue = (d) => chroma.hsl((h + d) % 360, s, l).hex();
+                switch(harmony) {
+                    case 'analogous': return [hue(-30), baseColor, hue(30)];
+                    case 'triad': return [baseColor, hue(120), hue(240)];
+                    case 'complementary': return [baseColor, hue(180)];
+                    case 'splitComp': return [baseColor, hue(150), hue(210)];
+                    case 'square': return [baseColor, hue(90), hue(180), hue(270)];
+                    case 'tetradic': return [baseColor, hue(60), hue(180), hue(240)];
+                    case 'monochromatic': return chroma.scale([c.darken(2), baseColor, c.brighten(2)]).mode('lch').colors(5);
+                    default: return [baseColor];
+                }
+            }, [baseColor, harmony]);
+
+            const mixes = useMemo(() => {
+                if (!chroma.valid(mix1) || !chroma.valid(mix2)) return [];
+                return chroma.scale([mix1, mix2]).mode(mixMode).colors(mixSteps);
+            }, [mix1, mix2, mixMode, mixSteps]);
+
+            const brights = useMemo(() => {
+                if (!chroma.valid(brightBase)) return [];
+                return brightMode === 'lighten' ? chroma.scale([brightBase, '#ffffff']).mode('lab').colors(brightSteps) : chroma.scale([brightBase, '#000000']).mode('lab').colors(brightSteps);
+            }, [brightBase, brightMode, brightSteps]);
+
+            // Utils
+            const updateNested = (cat, key, val) => setSettings(p => ({ ...p, [cat]: { ...p[cat], [key]: val } }));
+            const handleSlider = (key, val) => setSettings(p => ({ ...p, [key]: val }));
+            
+            // Config Handlers
+            const [jsonInput, setJsonInput] = useState('');
+            const handleExport = () => setJsonInput(JSON.stringify(settings, null, 2));
+            const handleImport = () => {
+                try {
+                    const parsed = JSON.parse(jsonInput);
+                    setSettings(parsed);
+                } catch(e) { alert("Invalid JSON"); }
+            };
+
+            return (
+            <div className="flex h-screen w-full flex-col lg:flex-row bg-background text-foreground overflow-hidden">
+                {/* Left/Top: Canvas */}
+                <div className="relative flex-grow h-[40vh] lg:h-full lg:w-2/3">
+                <ShaderPreview settings={settings} canvasBg={canvasBg} />
+                </div>
+
+                {/* Right/Bottom: Controls Sidebar */}
+                <div className="relative lg:h-full lg:w-1/3 glass-panel border-l border-white/10 flex flex-col">
+                
+                {/* Sidebar Header */}
+                <div className="flex-none p-4 border-b border-white/10 flex items-center justify-between">
+                <a href="/" className="flex items-center">
+                    <img src="logo.png" alt="Logo" className="w-[28px] h-[28px]" />
+                    <h1 className="text-xl mx-2 font-bold bg-clip-text text-transparent bg-white">
+                    {t('appName')}
+                    </h1>
+                </a>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex-none flex items-center space-x-1 px-4 py-2 border-b border-white/10 overflow-x-auto no-scrollbar">
+                    {['controls', 'palette', 'mix', 'brightness', 'config'].map(tab => (
+                    <button
+                        key={tab}
+                        onClick={() => setActiveTab(tab)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                        activeTab === tab ? 'bg-accent text-black' : 'text-gray-400 hover:text-white'
+                        }`}
+                    >
+                        {t(tab)}
+                    </button>
+                    ))}
+                </div>
+
+                {/* Scrollable Content */}
+                <div className="flex-grow overflow-y-auto p-6 space-y-6">
+                    {t('language')}
+                    <StaticSelect
+                        options={[
+                            { value: 'en', label: 'English' },
+                            { value: 'he', label: 'עברית' },
+                            { value: 'it', label: 'Italiano' },
+                        ]}
+                        selectedValue={language}
+                        onChange={setLanguage}
+                    />
+                    {/* TAB: CONTROLS */}
+                    {activeTab === 'controls' && (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+                        {/* Text Config */}
+                        <div className="space-y-3">
+                        <label className="text-xs text-gray-500 font-bold uppercase tracking-widest block">
+                            {t('text')}
+                        </label>
+                        <textarea
+                            value={settings.text}
+                            onChange={e => handleSlider('text', e.target.value)}
+                            className="w-full h-20 bg-black/50 border border-white/10 rounded-lg p-2 text-white text-sm focus:border-accent outline-none font-sans"
+                        />
+                        <div className="grid gap-4">
+                            <div className="space-y-1">
+                            <label className="text-[10px] text-gray-400 flex justify-between">
+                                <span>{t('fontSize')}</span>
+                                <span className="text-accent">{Math.round(settings.fontSize)}</span>
+                            </label>
+                            <CustomSlider
+                                value={settings.fontSize}
+                                min={10}
+                                max={1200}
+                                step={1}
+                                onValueChange={v => handleSlider('fontSize', v)}
+                                isRTL={dir === 'rtl'}
+                            />
+                            </div>
+                        </div>
+                        <div className="grid gap-4">
+                            <div className="space-y-1">
+                            <label className="text-[10px] text-gray-400 flex justify-between">
+                                <span>{t('fontWeight')}</span>
+                                <span className="text-accent">{Math.round(settings.fontWeight)}</span>
+                            </label>
+                            <CustomSlider
+                                value={settings.fontWeight}
+                                min={100}
+                                max={900}
+                                step={100}
+                                onValueChange={v => handleSlider('fontWeight', v)}
+                                isRTL={dir === 'rtl'}
+                            />
+                            </div>
+                        </div>
+                        <div className="grid gap-4">
+                            <div className="space-y-1">
+                            <label className="text-[10px] text-gray-400 flex justify-between">
+                                <span>{t('offsetX')}</span>
+                                <span className="text-accent">{Math.round(settings.textTranslateX)}</span>
+                            </label>
+                            <CustomSlider
+                                value={settings.textTranslateX}
+                                min={-500}
+                                max={500}
+                                step={1}
+                                onValueChange={v => handleSlider('textTranslateX', v)}
+                                isRTL={dir === 'rtl'}
+                            />
+                            </div>
+                        </div>
+                        <div className="grid gap-4">
+                            <div className="space-y-1">
+                            <label className="text-[10px] text-gray-400 flex justify-between">
+                                <span>{t('offsetY')}</span>
+                                <span className="text-accent">{Math.round(settings.textTranslateY)}</span>
+                            </label>
+                            <CustomSlider
+                                value={settings.textTranslateY}
+                                min={-500}
+                                max={500}
+                                step={1}
+                                onValueChange={v => handleSlider('textTranslateY', v)}
+                                isRTL={dir === 'rtl'}
+                            />
+                            </div>
+                        </div>
+                        </div>
+
+                        {/* Canvas Background */}
+                        <div className="space-y-3 pt-4 border-t border-white/10">
+                        <label className="text-xs text-gray-500 font-bold uppercase tracking-widest block">
+                            {t('canvasBg')}
+                        </label>
+                        <div className="flex flex-wrap gap-4">
+                            <ColorPicker color={canvasBg} onChange={setCanvasBg} />
+                        </div>
+                        </div>
+
+                        {/* Shader Select */}
+                        <div className="space-y-3 pt-4 border-t border-white/10">
+                        <StaticSelect
+                            label={t('activeShader')}
+                            options={['melt', 'flow', 'balatro', 'glass', 'chargedCells'].map(v => ({
+                            value: v,
+                            label: v,
+                            }))}
+                            selectedValue={settings.activeShader}
+                            onChange={v => handleSlider('activeShader', v)}
+                        />
+                        </div>
+
+                        {/* Specific Shader Controls */}
+                        <div className="p-4 bg-white/5 rounded-xl border border-white/5 space-y-4">
+
+                        {/* MELT SHADER */}
+                        {settings.activeShader === 'melt' && (
+                            <>
+                            <ShaderSlider label={t('zoom')} value={settings.melt.zoom} min={0.1} max={32} step={0.1}
+                                update={v => updateNested('melt', 'zoom', v)} dir={dir} />
+                            <ShaderSlider label={t('speed')} value={settings.melt.speed} min={0} max={2} step={0.05}
+                                update={v => updateNested('melt', 'speed', v)} dir={dir} />
+                            <ShaderSlider label={t('hue')} value={settings.melt.hue} min={0} max={360} step={1}
+                                update={v => updateNested('melt', 'hue', v)} dir={dir} />
+                            <ShaderSlider label={t('saturation')} value={settings.melt.saturation} min={0} max={2} step={0.05}
+                                update={v => updateNested('melt', 'saturation', v)} dir={dir} />
+                            <ShaderSlider label={t('contrast')} value={settings.melt.contrast} min={0} max={3} step={0.1}
+                                update={v => updateNested('melt', 'contrast', v)} dir={dir} />
+                            </>
+                        )}
+
+                        {/* BALATRO SHADER */}
+                        {settings.activeShader === 'balatro' && (
+                            <>
+                            <ShaderSlider label={t('speed')} value={settings.balatro.speed} min={0} max={5} step={0.1}
+                                update={v => updateNested('balatro', 'speed', v)} dir={dir} />
+                            <ShaderSlider label={t('contrast')} value={settings.balatro.contrast} min={0} max={5} step={0.1}
+                                update={v => updateNested('balatro', 'contrast', v)} dir={dir} />
+                            <ShaderSlider label={t('spinAmount')} value={settings.balatro.spinAmount} min={-2} max={2} step={0.05}
+                                update={v => updateNested('balatro', 'spinAmount', v)} dir={dir} />
+
+                            <div className="flex flex-wrap gap-6 mt-4">
+                                {['color1', 'color2', 'color3'].map((col, i) => (
+                                <div key={col} className="flex-1 min-w-[300px] space-y-2">
+                                    <span className="text-xs uppercase text-gray-500">Color {i + 1}</span>
+                                    <ColorPicker
+                                    color={rgbArrayToHex(settings.balatro[col])}
+                                    onChange={h => updateNested('balatro', col, hexToRgbArray(h))}
+                                    />
+                                </div>
+                                ))}
+                            </div>
+                            </>
+                        )}
+
+                        {/* GLASS SHADER */}
+                        {settings.activeShader === 'glass' && (
+                            <>
+                            <ShaderSlider label={t('sides')} value={settings.glass.sides} min={3} max={32} step={1}
+                                update={v => updateNested('glass', 'sides', v)} dir={dir} />
+                            <ShaderSlider label={t('density')} value={settings.glass.density} min={5} max={50} step={1}
+                                update={v => updateNested('glass', 'density', v)} dir={dir} />
+                            <ShaderSlider label={t('hue')} value={settings.glass.hue} min={0} max={360} step={1}
+                                update={v => updateNested('glass', 'hue', v)} dir={dir} />
+                            <ShaderSlider label={t('saturation')} value={settings.glass.saturation} min={0} max={2} step={0.05}
+                                update={v => updateNested('glass', 'saturation', v)} dir={dir} />
+                            <ShaderSlider label={t('contrast')} value={settings.glass.contrast} min={0} max={3} step={0.1}
+                                update={v => updateNested('glass', 'contrast', v)} dir={dir} />
+                            <ShaderSlider label={t('glow')} value={settings.glass.glow} min={0.5} max={3} step={0.1}
+                                update={v => updateNested('glass', 'glow', v)} dir={dir} />
+                            </>
+                        )}
+
+                        {/* FLOW SHADER */}
+                        {settings.activeShader === 'flow' && (
+                        <>
+                            <div>
+                            <label className="text-xs text-gray-400 flex justify-between">
+                                <span>{t('detail')}</span>
+                                <span className="text-accent">{Math.round(settings.flow.detail)}</span>
+                            </label>
+                            <CustomSlider value={settings.flow.detail} min={10} max={500} step={10}
+                                onValueChange={v => updateNested('flow', 'detail', v)} isRTL={dir === 'rtl'} />
+                            </div>
+                            <div>
+                            <label className="text-xs text-gray-400 flex justify-between">
+                                <span>{t('twist')}</span>
+                                <span className="text-accent">{Math.round(settings.flow.twist)}</span>
+                            </label>
+                            <CustomSlider value={settings.flow.twist} min={-100} max={100} step={1}
+                                onValueChange={v => updateNested('flow', 'twist', v)} isRTL={dir === 'rtl'} />
+                            </div>
+                            <div>
+                            <label className="text-xs text-gray-400 flex justify-between">
+                                <span>{t('colorOffset')}</span>
+                                <span className="text-accent">{settings.flow.colorOffset.toFixed(2)}</span>
+                            </label>
+                            <CustomSlider value={settings.flow.colorOffset} min={-1} max={1} step={0.05}
+                                onValueChange={v => updateNested('flow', 'colorOffset', v)} isRTL={dir === 'rtl'} />
+                            </div>
+                            <div>
+                            <label className="text-xs text-gray-400 flex justify-between">
+                                <span>{t('hue')}</span>
+                                <span className="text-accent">{Math.round(settings.flow.hue)}</span>
+                            </label>
+                            <CustomSlider value={settings.flow.hue} min={0} max={360} step={1}
+                                onValueChange={v => updateNested('flow', 'hue', v)} isRTL={dir === 'rtl'} />
+                            </div>
+                            <div>
+                            <label className="text-xs text-gray-400 flex justify-between">
+                                <span>{t('saturation')}</span>
+                                <span className="text-accent">{settings.flow.saturation.toFixed(2)}</span>
+                            </label>
+                            <CustomSlider value={settings.flow.saturation} min={0} max={2} step={0.05}
+                                onValueChange={v => updateNested('flow', 'saturation', v)} isRTL={dir === 'rtl'} />
+                            </div>
+                            <div>
+                            <label className="text-xs text-gray-400 flex justify-between">
+                                <span>{t('contrast')}</span>
+                                <span className="text-accent">{settings.flow.contrast.toFixed(2)}</span>
+                            </label>
+                            <CustomSlider value={settings.flow.contrast} min={0} max={3} step={0.1}
+                                onValueChange={v => updateNested('flow', 'contrast', v)} isRTL={dir === 'rtl'} />
+                            </div>
+                            
+                            <div className="mt-4 space-y-2">
+                            <span className="text-xs uppercase text-gray-500">{t('tintColor')}</span>
+                            <ColorPicker color={rgbArrayToHex([settings.flow.rgbR, settings.flow.rgbG, settings.flow.rgbB])}
+                                onChange={hex => {
+                                const [r, g, b] = hexToRgbArray(hex);
+                                setSettings(p => ({
+                                    ...p,
+                                    flow: { ...p.flow, rgbR: r, rgbG: g, rgbB: b },
+                                }));
+                                }} />
+                            </div>
+                        </>
+                        )}
+
+                        {/* CHARGED CELLS SHADER */}
+                        {settings.activeShader === 'chargedCells' && (
+                            <>
+                            <ShaderSlider label={t('scale')} value={settings.chargedCells.scale} min={1} max={120} step={0.1}
+                                update={v => updateNested('chargedCells', 'scale', v)} dir={dir} />
+                            <ShaderSlider label={t('speed')} value={settings.chargedCells.speed} min={0} max={5} step={0.1}
+                                update={v => updateNested('chargedCells', 'speed', v)} dir={dir} />
+                            <ShaderSlider label={t('hue')} value={settings.chargedCells.hue} min={0} max={360} step={1}
+                                update={v => updateNested('chargedCells', 'hue', v)} dir={dir} />
+                            <ShaderSlider label={t('saturation')} value={settings.chargedCells.saturation} min={0} max={2} step={0.05}
+                                update={v => updateNested('chargedCells', 'saturation', v)} dir={dir} />
+                            <ShaderSlider label={t('contrast')} value={settings.chargedCells.contrast} min={0} max={3} step={0.1}
+                                update={v => updateNested('chargedCells', 'contrast', v)} dir={dir} />
+
+                            <div className="flex flex-wrap gap-6 mt-4">
+                                {['color1', 'color2', 'color3'].map((col, i) => (
+                                <div key={col} className="flex-1 min-w-[300px] space-y-2">
+                                    <span className="text-xs uppercase text-gray-500">Color {i + 1}</span>
+                                    <ColorPicker
+                                    color={rgbArrayToHex(settings.chargedCells[col])}
+                                    onChange={h => updateNested('chargedCells', col, hexToRgbArray(h))}
+                                    />
+                                </div>
+                                ))}
+                            </div>
+                            </>
+                        )}
+                        </div>
+
+                        {/* Effects */}
+                        <div className="space-y-3 pt-4 border-t border-white/10">
+                            <div>
+                            <label className="text-xs text-gray-400 mb-1 flex justify-between">
+                                <span>{t('blurStrength')}</span>
+                                <span className="text-accent">{settings.blurStrength.toFixed(1)}</span>
+                            </label>
+                            <CustomSlider
+                                value={settings.blurStrength}
+                                min={0}
+                                max={50}
+                                step={0.1}
+                                onValueChange={v => handleSlider('blurStrength', v)}
+                                isRTL={dir === 'rtl'}
+                            />
+                            </div>
+                        </div>
+                        <div className="flex flex-col items-center space-y-6">
+                        <NamerUiBadge
+                            poweredByText={t('poweredBy')}
+                            namerUIName={dir === 'rtl' ? 'נמר UI' : 'Namer UI'}
+                            isRTL={dir === 'rtl'}
+                        />
+                        </div>        
+                        <div className="glass-panel p-6 rounded-squircle mt-12 text-xs text-gray-300">
+                            <h3 className="font-bold text-lg mb-2 text-white">{t('creditTitle')}</h3>
+                            <p className="text-gray-400 text-sm mb-4">{t('creditDescription')}</p>
+                            <Credits />
+                        </div>
+                        <div className="pt-10"/>
+                    </div>
+                    )}
+
+                    {/* TAB: PALETTE (Nof Go) */}
+                    {activeTab === 'palette' && (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+                        <div>
+                        <label className="text-xs text-gray-500 font-bold uppercase tracking-widest mb-3 block">
+                            {t('baseColor')}
+                        </label>
+                        <ColorPicker color={baseColor} onChange={setBaseColor} />
+                        </div>
+                        <StaticSelect
+                        options={[
+                            { value: 'analogous' },
+                            { value: 'triad' },
+                            { value: 'complementary' },
+                            { value: 'splitComp' },
+                            { value: 'square' },
+                            { value: 'tetradic' },
+                            { value: 'monochromatic' },
+                        ]}
+                        selectedValue={harmony}
+                        onChange={setHarmony}
+                        label={t('mode')}
+                        />
+                        <div className="grid grid-cols-1 gap-4 pt-4 border-t border-white/10">
+                        {harmonies.map((c, i) => (
+                            <ColorCard key={i} hex={c} />
+                        ))}
+                        </div>
+                    </div>
+                    )}
+
+                    {/* TAB: MIX (Nof Go) */}
+                    {activeTab === 'mix' && (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-xs text-gray-500 font-bold uppercase tracking-widest mb-2 block">
+                            {t('firstColor')}
+                            </label>
+                            <div className="origin-top-left">
+                            <ColorPicker color={mix1} onChange={setMix1} />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-xs text-gray-500 font-bold uppercase tracking-widest mb-2 block">
+                            {t('secondColor')}
+                            </label>
+                            <div className="origin-top-left">
+                            <ColorPicker color={mix2} onChange={setMix2} />
+                            </div>
+                        </div>
+                        </div>
+                        <StaticSelect
+                        label={t('mixMode')}
+                        options={['rgb', 'lch', 'lab', 'hsl'].map(v => ({ value: v }))}
+                        selectedValue={mixMode}
+                        onChange={setMixMode}
+                        />
+                        <div>
+                        <label className="text-xs text-gray-500 mb-2 block flex justify-between">
+                            <span>{t('steps')}</span>
+                            <span className="text-accent">{mixSteps}</span>
+                        </label>
+                        <CustomSlider
+                            min={3}
+                            max={120}
+                            step={1}
+                            value={mixSteps}
+                            onValueChange={setMixSteps}
+                            isRTL={dir === 'rtl'}
+                        />
+                        </div>
+                        <div className="grid grid-cols-1 gap-4 pt-4 border-t border-white/10">
+                        {mixes.map((c, i) => (
+                            <ColorCard key={i} hex={c} />
+                        ))}
+                        </div>
+                    </div>
+                    )}
+
+                    {/* TAB: BRIGHTNESS (Nof Go) */}
+                    {activeTab === 'brightness' && (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+                        <div>
+                        <label className="text-xs text-gray-500 font-bold uppercase tracking-widest mb-3 block">
+                            {t('baseColor')}
+                        </label>
+                        <ColorPicker color={brightBase} onChange={setBrightBase} />
+                        </div>
+                        <div className="flex bg-black/50 rounded-lg border border-white/10 p-1 mb-4">
+                        <button
+                            onClick={() => setBrightMode('lighten')}
+                            className={`flex-1 py-2 text-xs rounded transition-colors ${
+                            brightMode === 'lighten'
+                                ? 'bg-accent text-black font-semibold'
+                                : 'text-gray-300 hover:bg-white/10'
+                            }`}
+                        >
+                            {t('lighten')}
+                        </button>
+                        <button
+                            onClick={() => setBrightMode('darken')}
+                            className={`flex-1 py-2 text-xs rounded transition-colors ${
+                            brightMode === 'darken'
+                                ? 'bg-accent text-black font-semibold'
+                                : 'text-gray-300 hover:bg-white/10'
+                            }`}
+                        >
+                            {t('darken')}
+                        </button>
+                        </div>
+                        <div>
+                        <label className="text-xs text-gray-500 mb-2 block flex justify-between">
+                            <span>{t('steps')}</span>
+                            <span className="text-accent">{brightSteps}</span>
+                        </label>
+                        <CustomSlider
+                            min={3}
+                            max={120}
+                            step={1}
+                            value={brightSteps}
+                            onValueChange={setBrightSteps}
+                            isRTL={dir === 'rtl'}
+                        />
+                        </div>
+                        <div className="grid grid-cols-1 gap-4 pt-4 border-t border-white/10">
+                        {brights.map((c, i) => (
+                            <ColorCard key={i} hex={c} />
+                        ))}
+                        </div>
+                    </div>
+                    )}
+
+                    {/* TAB: CONFIG */}
+                    {activeTab === 'config' && (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+                        <div className="space-y-2">
+                        <label className="text-xs text-gray-500 font-bold uppercase tracking-widest block">
+                            {t('export')}
+                        </label>
+                        <button
+                            onClick={handleExport}
+                            className="w-full py-2 rounded-lg bg-accent text-black font-semibold hover:bg-white transition-colors"
+                        >
+                            {t('exportConfig')}
+                        </button>
+                        {jsonInput && (
+                            <textarea
+                            readOnly
+                            value={jsonInput}
+                            className="w-full h-32 bg-black/50 border border-white/10 rounded-lg p-2 text-xs font-mono text-gray-300 outline-none mt-2"
+                            />
+                        )}
+                        </div>
+                        <div className="space-y-2 pt-4 border-t border-white/10">
+                        <label className="text-xs text-gray-500 font-bold uppercase tracking-widest block">
+                            {t('import')}
+                        </label>
+                        <textarea
+                            value={jsonInput}
+                            onChange={e => setJsonInput(e.target.value)}
+                            placeholder={t('pasteJson')}
+                            className="w-full h-32 bg-black/50 border border-white/10 rounded-lg p-2 text-xs font-mono text-white focus:border-accent outline-none"
+                        />
+                        <button
+                            onClick={handleImport}
+                            className="w-full py-2 rounded-lg bg-white/10 text-white font-semibold hover:bg-white/20 transition-colors mt-2"
+                        >
+                            {t('importConfig')}
+                        </button>
+                        </div>
+                    </div>
+                    )}
+                </div>
+                </div>
+            </div>
+            );
+        };
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<LanguageProvider><App /></LanguageProvider>);
+    </script>
+</body>
+</html>
