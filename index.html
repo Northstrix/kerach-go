@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kerach Go</title>
     <link rel="icon" type="image/png" href="logo.png">
+    <meta name="description" content="A petite text shaderer whose entire code fits into a single html file.">
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -554,69 +555,212 @@
         const translations = {
             en: {
                 appName: "Kerach Go",
-                controls: "Controls", shader: "Shader", palette: "Palette", mix: "Mix", brightness: "Brightness", language: "Language",
-                text: "Text", content: "Content", fontFamily: "Font Family", fontSize: "Font Size", fontWeight: "Font Weight", offsetX: "Offset X", offsetY: "Offset Y",
-                appearance: "Appearance", activeShader: "Active Shader", effects: "Effects", blurType: "Blur Type", blurStrength: "Blur Strength", blurAngle: "Blur Angle", noiseType: "Noise Type", noiseStrength: "Noise Strength",
-                melt: "Melt", flow: "Flow", balatro: "Balatro", glass: "Psychedelic Glass", chargedCells: "Charged Cells",
-                hue: "Hue Shift", saturation: "Saturation", contrast: "Contrast", zoom: "Zoom", speed: "Speed", detail: "Detail", velocity: "Velocity", twist: "Twist", colorOffset: "Color Offset",
-                lighting: "Lighting", spinAmount: "Spin Amount", pixelFilter: "Pixel Filter", rotateView: "Rotate View", sides: "Sides", density: "Density", glow: "Glow", scale: "Scale",
+                controls: "Controls", shader: "Shader", palette: "Palette", mix: "Mix",
+                brightness: "Brightness", language: "Language",
+                text: "Text", content: "Content", fontFamily: "Font Family",
+                fontSize: "Font Size", fontWeight: "Font Weight",
+                offsetX: "Offset X", offsetY: "Offset Y",
+                appearance: "Appearance", activeShader: "Active Shader", effects: "Effects",
+                blurType: "Blur Type", blurStrength: "Blur Strength", blurAngle: "Blur Angle",
+                noiseType: "Noise Type", noiseStrength: "Noise Strength",
+                melt: "Melt", flow: "Flow", balatro: "Balatro",
+                glass: "Psychedelic Glass", chargedCells: "Charged Cells",
+                hue: "Hue Shift", saturation: "Saturation", contrast: "Contrast",
+                zoom: "Zoom", speed: "Speed", detail: "Detail", velocity: "Velocity",
+                twist: "Twist", colorOffset: "Color Offset", lighting: "Lighting",
+                spinAmount: "Spin Amount", pixelFilter: "Pixel Filter", rotateView: "Rotate View",
+                sides: "Sides", density: "Density", glow: "Glow", scale: "Scale",
                 tintColor: "Tint Color", shaderColors: "Shader Colors", cellColors: "Cell Colors",
-                animation: "Animation", play: "Play", pause: "Pause", manualTime: "Manual Time",
-                config: "Config", export: "Export", import: "Import", exportConfig: "Export Config", importConfig: "Import Config", pasteJson: "Paste config JSON...",
-                baseColor: "Base Color", mode: "Mode", output: "Output", analogous: "Analogous", triad: "Triad", complementary: "Complementary", splitComp: "Split Complementary", square: "Square", tetradic: "Tetradic", monochromatic: "Monochromatic",
-                firstColor: "First Color", secondColor: "Second Color", steps: "Steps", mixMode: "Mix Mode", lighten: "Lighten", darken: "Darken", amount: "Amount",
-                contrastRatio: "Contrast Ratio", language: "Language", canvasBg: "Canvas Background",
-                creditTitle: "Credits", creditDescription: "The existence of this project wouldn't be possible without:",
-                poweredBy: "Powered by", apply: "Apply", contrast: "Contrast", creditTitle: "Credits & Info",
-                creditDescription: "The existence of this project wouldn't have been possible without the following:", none: "None",
-                gaussian: "Gaussian",
-                motion: "Motion",
-                zoom: "Zoom",
+                temporalOverride: "Temporal Override", time: "Time",
+                spinRotation: "Spin Rotation", spinSpeed: "Spin Speed", spinEase: "Spin Ease",
+                config: "Config", export: "Export", import: "Import",
+                exportConfig: "Export Config", importConfig: "Import Config", pasteJson: "Paste config JSON...",
+                baseColor: "Base Color", mode: "Mode", output: "Output",
+                analogous: "Analogous", triad: "Triad", complementary: "Complementary",
+                splitComp: "Split Complementary", square: "Square", tetradic: "Tetradic", monochromatic: "Monochromatic",
+                firstColor: "First Color", secondColor: "Second Color", steps: "Steps",
+                mixMode: "Mix Mode", lighten: "Lighten", darken: "Darken", amount: "Amount",
+                contrastRatio: "Contrast Ratio", canvasBg: "Canvas Background",
+                creditTitle: "Credits & Info",
+                creditDescription: "The existence of this project wouldn't have been possible without the following:",
+                poweredBy: "Powered by", apply: "Apply", none: "None",
+                gaussian: "Gaussian", motion: "Motion"
             },
             he: {
                 appName: "קרח Go",
-                controls: "בקרים", shader: "שיידר", palette: "פלטה", mix: "ערבוב", brightness: "בהירות", language: "שפה",
-                text: "טקסט", content: "תוכן", fontFamily: "גופן", fontSize: "גודל", fontWeight: "משקל", offsetX: "הזזה X", offsetY: "הזזה Y",
-                appearance: "מראה", activeShader: "שיידר פעיל", effects: "אפקטים", blurType: "סוג טשטוש", blurStrength: "עוצמת טשטוש", blurAngle: "זווית", noiseType: "סוג רעש", noiseStrength: "עוצמת רעש",
+                controls: "בקרים", shader: "שיידר", palette: "פלטה", mix: "ערבוב",
+                brightness: "בהירות", language: "שפה", text: "טקסט", content: "תוכן",
+                fontFamily: "גופן", fontSize: "גודל", fontWeight: "משקל",
+                offsetX: "הזזה X", offsetY: "הזזה Y",
+                appearance: "מראה", activeShader: "שיידר פעיל", effects: "אפקטים",
+                blurType: "סוג טשטוש", blurStrength: "עוצמת טשטוש", blurAngle: "זווית",
+                noiseType: "סוג רעש", noiseStrength: "עוצמת רעש",
                 melt: "המסה", flow: "זרימה", balatro: "בלאטרו", glass: "זכוכית", chargedCells: "תאים טעונים",
-                hue: "גוון", saturation: "רוויה", contrast: "ניגודיות", zoom: "זום", speed: "מהירות", detail: "פירוט", velocity: "תאוצה", twist: "פיתול", colorOffset: "היסט צבע",
-                lighting: "תאורה", spinAmount: "סיבוב", pixelFilter: "פיקסול", rotateView: "סובב תצוגה", sides: "צלעות", density: "צפיפות", glow: "זוהר", scale: "קנה מידה",
+                hue: "גוון", saturation: "רוויה", contrast: "ניגודיות", zoom: "זום",
+                speed: "מהירות", detail: "פירוט", velocity: "תאוצה", twist: "פיתול", colorOffset: "היסט צבע",
+                lighting: "תאורה", spinAmount: "סיבוב", pixelFilter: "פילטר פיקסלים",
+                rotateView: "סובב תצוגה", sides: "צלעות", density: "צפיפות", glow: "זוהר", scale: "קנה מידה",
                 tintColor: "צבע גוון", shaderColors: "צבעי שיידר", cellColors: "צבעי תאים",
-                animation: "אנימציה", play: "נגן", pause: "השהה", manualTime: "זמן ידני",
-                config: "הגדרות", export: "ייצוא", import: "ייבוא", exportConfig: "ייצא הגדרות", importConfig: "ייבא הגדרות", pasteJson: "הדבק JSON...",
-                baseColor: "צבע בסיס", mode: "מצב", output: "תוצאה", analogous: "אנלוגי", triad: "משולש", complementary: "משלים", splitComp: "משלים מפוצל", square: "ריבוע", tetradic: "טטרדי", monochromatic: "מונוכרומטי",
-                firstColor: "צבע ראשון", secondColor: "צבע שני", steps: "צעדים", mixMode: "מצב ערבוב", lighten: "הבהרה", darken: "הכהיה", amount: "כמות",
-                contrastRatio: "יחס ניגודיות", language: "שפה", canvasBg: "רקע קנבס",
-                creditTitle: "קרדיטים", creditDescription: "הפרויקט הזה לא היה מתאפשר ללא:",
-                poweredBy: "מופעל ע״י", apply: "החל", contrast: "ניגודיות", creditTitle: "קרדיטים ומידע",
-                creditDescription: "קיומו של הפרויקט הזה לא היה אפשרי בלעדי:", none: "ללא",
-                gaussian: "גאוסיאני",
-                motion: "תנועה",
-                zoom: "זום",
+                temporalOverride: "עקיפה זמנית", time: "זמן", spinRotation: "סיבוב סיבובי",
+                spinSpeed: "מהירות סיבוב", spinEase: "קלות סיבוב", config: "הגדרות",
+                export: "ייצוא", import: "ייבוא", exportConfig: "ייצא הגדרות",
+                importConfig: "ייבא הגדרות", pasteJson: "הדבק JSON...",
+                baseColor: "צבע בסיס", mode: "מצב", output: "תוצאה",
+                analogous: "אנלוגי", triad: "משולש", complementary: "משלים",
+                splitComp: "משלים מפוצל", square: "ריבוע", tetradic: "טטרדי", monochromatic: "מונוכרומטי",
+                firstColor: "צבע ראשון", secondColor: "צבע שני", steps: "צעדים",
+                mixMode: "מצב ערבוב", lighten: "הבהרה", darken: "הכהיה", amount: "כמות",
+                contrastRatio: "יחס ניגודיות", canvasBg: "רקע קנבס",
+                creditTitle: "קרדיטים ומידע",
+                creditDescription: "קיומו של הפרויקט הזה לא היה אפשרי בלעדי:",
+                poweredBy: "מופעל ע״י", apply: "החל", none: "ללא",
+                gaussian: "גאוסיאני", motion: "תנועה"
             },
             it: {
                 appName: "Kerach Go",
-                controls: "Controlli", shader: "Shader", palette: "Tavolozza", mix: "Miscela", brightness: "Luminosità", language: "Lingua",
-                text: "Testo", content: "Contenuto", fontFamily: "Carattere", fontSize: "Dimensione carattere", fontWeight: "Spessore carattere", offsetX: "Spostamento X", offsetY: "Spostamento Y",
-                appearance: "Aspetto", activeShader: "Shader attivo", effects: "Effetti", blurType: "Tipo di sfocatura", blurStrength: "Intensità sfocatura", blurAngle: "Angolo sfocatura", noiseType: "Tipo di rumore", noiseStrength: "Intensità rumore",
+                controls: "Controlli", shader: "Shader", palette: "Tavolozza", mix: "Miscela",
+                brightness: "Luminosità", language: "Lingua", text: "Testo", content: "Contenuto",
+                fontFamily: "Carattere", fontSize: "Dimensione carattere", fontWeight: "Spessore carattere",
+                offsetX: "Spostamento X", offsetY: "Spostamento Y",
+                appearance: "Aspetto", activeShader: "Shader attivo", effects: "Effetti",
+                blurType: "Tipo di sfocatura", blurStrength: "Intensità sfocatura", blurAngle: "Angolo sfocatura",
+                noiseType: "Tipo di rumore", noiseStrength: "Intensità rumore",
                 melt: "Fusione", flow: "Flusso", balatro: "Balatro", glass: "Vetro psichedelico", chargedCells: "Celle cariche",
-                hue: "Tonalità", saturation: "Saturazione", contrast: "Contrasto", zoom: "Zoom", speed: "Velocità", detail: "Dettaglio", velocity: "Velocità", twist: "Torsione", colorOffset: "Spostamento colore",
-                lighting: "Illuminazione", spinAmount: "Quantità di rotazione", pixelFilter: "Filtro pixel", rotateView: "Ruota vista", sides: "Lati", density: "Densità", glow: "Bagliore", scale: "Scala",
+                hue: "Tonalità", saturation: "Saturazione", contrast: "Contrasto", zoom: "Zoom",
+                speed: "Velocità", detail: "Dettaglio", velocity: "Velocità", twist: "Torsione", colorOffset: "Spostamento colore",
+                lighting: "Illuminazione", spinAmount: "Quantità di rotazione", pixelFilter: "Filtro pixel",
+                rotateView: "Ruota vista", sides: "Lati", density: "Densità", glow: "Bagliore", scale: "Scala",
                 tintColor: "Colore tinta", shaderColors: "Colori shader", cellColors: "Colori celle",
-                animation: "Animazione", play: "Riproduci", pause: "Pausa", manualTime: "Tempo manuale",
-                config: "Configurazione", export: "Esporta", import: "Importa", exportConfig: "Esporta configurazione", importConfig: "Importa configurazione", pasteJson: "Incolla il JSON di configurazione...",
-                baseColor: "Colore base", mode: "Modalità", output: "Output", analogous: "Analoghi", triad: "Triade", complementary: "Complementare", splitComp: "Complementare diviso", square: "Quadrato", tetradic: "Tetradico", monochromatic: "Monocromatico",
-                firstColor: "Primo colore", secondColor: "Secondo colore", steps: "Passaggi", mixMode: "Modalità di fusione", lighten: "Schiarisci", darken: "Scurisci", amount: "Quantità",
-                contrastRatio: "Rapporto di contrasto", language: "Lingua", canvasBg: "Sfondo Canvas",
-                creditTitle: "Crediti", creditDescription: "L'esistenza di questo progetto non sarebbe possibile senza:",
-                poweredBy: "Creato con", apply: "Applica", contrast: "Contrasto", creditTitle: "Crediti e Info",
-                creditDescription: "L'esistenza di questo progetto non sarebbe stata possibile senza:", none: "Nessuno",
-                gaussian: "Gaussiano",
-                motion: "Movimento",
-                zoom: "Zoom",
-
+                temporalOverride: "Override temporale", time: "Tempo", spinRotation: "Rotazione spin",
+                spinSpeed: "Velocità di rotazione", spinEase: "Ease di rotazione", config: "Configurazione",
+                export: "Esporta", import: "Importa", exportConfig: "Esporta configurazione",
+                importConfig: "Importa configurazione", pasteJson: "Incolla il JSON di configurazione...",
+                baseColor: "Colore base", mode: "Modalità", output: "Output",
+                analogous: "Analoghi", triad: "Triade", complementary: "Complementare",
+                splitComp: "Complementare diviso", square: "Quadrato", tetradic: "Tetradico", monochromatic: "Monocromatico",
+                firstColor: "Primo colore", secondColor: "Secondo colore", steps: "Passaggi",
+                mixMode: "Modalità di fusione", lighten: "Schiarisci", darken: "Scurisci", amount: "Quantità",
+                contrastRatio: "Rapporto di contrasto", canvasBg: "Sfondo Canvas",
+                creditTitle: "Crediti e Info",
+                creditDescription: "L'esistenza di questo progetto non sarebbe stata possibile senza:",
+                poweredBy: "Creato con", apply: "Applica", none: "Nessuno",
+                gaussian: "Gaussiano", motion: "Movimento"
             },
-        }
+            es: {
+                appName: "Kerach Go",
+                controls: "Controles", shader: "Shader", palette: "Paleta", mix: "Mezcla",
+                brightness: "Brillo", language: "Idioma", text: "Texto", content: "Contenido",
+                fontFamily: "Fuente", fontSize: "Tamaño de fuente", fontWeight: "Grosor",
+                offsetX: "Desplazamiento X", offsetY: "Desplazamiento Y", appearance: "Apariencia",
+                activeShader: "Shader activo", effects: "Efectos", blurType: "Tipo de desenfoque",
+                blurStrength: "Intensidad de desenfoque", blurAngle: "Ángulo de desenfoque",
+                noiseType: "Tipo de ruido", noiseStrength: "Intensidad del ruido",
+                melt: "Derretir", flow: "Flujo", balatro: "Balatro", glass: "Vidrio psicodélico", chargedCells: "Celdas cargadas",
+                hue: "Matiz", saturation: "Saturación", contrast: "Contraste", zoom: "Zoom",
+                speed: "Velocidad", detail: "Detalle", velocity: "Velocidad", twist: "Torsión", colorOffset: "Desfase de color",
+                lighting: "Iluminación", spinAmount: "Cantidad de giro", pixelFilter: "Filtro de píxeles",
+                rotateView: "Girar vista", sides: "Lados", density: "Densidad", glow: "Brillo", scale: "Escala",
+                tintColor: "Color de tinte", shaderColors: "Colores del shader", cellColors: "Colores de celdas",
+                temporalOverride: "Anulación temporal", time: "Tiempo", spinRotation: "Rotación del giro",
+                spinSpeed: "Velocidad de giro", spinEase: "Suavidad de giro", config: "Configuración",
+                export: "Exportar", import: "Importar", exportConfig: "Exportar configuración",
+                importConfig: "Importar configuración", pasteJson: "Pegar JSON de configuración...",
+                baseColor: "Color base", mode: "Modo", output: "Salida",
+                analogous: "Análogos", triad: "Tríada", complementary: "Complementario",
+                splitComp: "Complementario dividido", square: "Cuadrado", tetradic: "Tetrádico", monochromatic: "Monocromático",
+                firstColor: "Primer color", secondColor: "Segundo color", steps: "Pasos",
+                mixMode: "Modo de mezcla", lighten: "Aclarar", darken: "Oscurecer", amount: "Cantidad",
+                contrastRatio: "Relación de contraste", canvasBg: "Fondo del lienzo",
+                creditTitle: "Créditos e Información",
+                creditDescription: "La existencia de este proyecto no habría sido posible sin lo siguiente:",
+                poweredBy: "Desarrollado por", apply: "Aplicar", none: "Ninguno",
+                gaussian: "Gaussiano", motion: "Movimiento"
+            },
+            pt: {
+                appName: "Kerach Go",
+                controls: "Controles", shader: "Shader", palette: "Paleta", mix: "Mistura",
+                brightness: "Brilho", language: "Idioma", text: "Texto", content: "Conteúdo",
+                fontFamily: "Fonte", fontSize: "Tamanho da fonte", fontWeight: "Peso da fonte",
+                offsetX: "Deslocamento X", offsetY: "Deslocamento Y",
+                appearance: "Aparência", activeShader: "Shader ativo", effects: "Efeitos",
+                blurType: "Tipo de desfoque", blurStrength: "Intensidade do desfoque", blurAngle: "Ângulo do desfoque",
+                noiseType: "Tipo de ruído", noiseStrength: "Intensidade do ruído",
+                melt: "Derreter", flow: "Fluxo", balatro: "Balatro", glass: "Vidro psicodélico", chargedCells: "Células carregadas",
+                hue: "Matiz", saturation: "Saturação", contrast: "Contraste", zoom: "Zoom",
+                speed: "Velocidade", detail: "Detalhe", velocity: "Velocidade", twist: "Torção", colorOffset: "Deslocamento de cor",
+                lighting: "Iluminação", spinAmount: "Quantidade de rotação", pixelFilter: "Filtro de pixel",
+                rotateView: "Girar vista", sides: "Lados", density: "Densidade", glow: "Brilho", scale: "Escala",
+                tintColor: "Cor de tonalidade", shaderColors: "Cores do shader", cellColors: "Cores das células",
+                temporalOverride: "Substituição temporal", time: "Tempo", spinRotation: "Rotação do giro",
+                spinSpeed: "Velocidade de rotação", spinEase: "Facilidade de giro", config: "Configuração",
+                export: "Exportar", import: "Importar", exportConfig: "Exportar configuração",
+                importConfig: "Importar configuração", pasteJson: "Colar JSON de configuração...",
+                baseColor: "Cor base", mode: "Modo", output: "Saída",
+                analogous: "Análogas", triad: "Tríade", complementary: "Complementar",
+                splitComp: "Complementar dividido", square: "Quadrado", tetradic: "Tetrádico", monochromatic: "Monocromático",
+                firstColor: "Primeira cor", secondColor: "Segunda cor", steps: "Passos",
+                mixMode: "Modo de mistura", lighten: "Clarear", darken: "Escurecer", amount: "Quantidade",
+                contrastRatio: "Relação de contraste", canvasBg: "Fundo da tela",
+                creditTitle: "Créditos e Informações",
+                creditDescription: "A existência deste projeto não seria possível sem o seguinte:",
+                poweredBy: "Desenvolvido por", apply: "Aplicar", none: "Nenhum",
+                gaussian: "Gaussiano", motion: "Movimento"
+            },
+            ja: {
+                appName: "Kerach Go", controls: "コントロール", shader: "シェーダー", palette: "パレット", mix: "ミックス",
+                brightness: "明るさ", language: "言語", text: "テキスト", content: "内容",
+                fontFamily: "フォント", fontSize: "フォントサイズ", fontWeight: "フォントの太さ",
+                offsetX: "オフセット X", offsetY: "オフセット Y",
+                appearance: "外観", activeShader: "アクティブシェーダー", effects: "エフェクト",
+                blurType: "ぼかしタイプ", blurStrength: "ぼかし強度", blurAngle: "ぼかし角度",
+                noiseType: "ノイズタイプ", noiseStrength: "ノイズ強度",
+                melt: "溶ける", flow: "流れ", balatro: "バラトロ", glass: "サイケデリックグラス", chargedCells: "帯電セル",
+                hue: "色相", saturation: "彩度", contrast: "コントラスト", zoom: "ズーム",
+                speed: "速度", detail: "ディテール", velocity: "速度", twist: "ツイスト", colorOffset: "カラ―オフセット",
+                lighting: "照明", spinAmount: "回転量", pixelFilter: "ピクセルフィルター", rotateView: "ビューを回転",
+                sides: "辺", density: "密度", glow: "光彩", scale: "スケール",
+                tintColor: "ティントカラー", shaderColors: "シェーダーカラー", cellColors: "セルカラー",
+                temporalOverride: "テンポラルオーバーライド", time: "時間",
+                spinRotation: "スピン回転", spinSpeed: "スピード回転", spinEase: "スピン緩和",
+                config: "設定", export: "エクスポート", import: "インポート",
+                exportConfig: "設定をエクスポート", importConfig: "設定をインポート", pasteJson: "設定JSONを貼り付け...",
+                baseColor: "基本色", mode: "モード", output: "出力",
+                analogous: "類似色", triad: "三色配色", complementary: "補色",
+                splitComp: "分割補色", square: "四角配色", tetradic: "四色配色", monochromatic: "単色",
+                firstColor: "最初の色", secondColor: "2番目の色", steps: "ステップ",
+                mixMode: "ミックスモード", lighten: "明るく", darken: "暗く", amount: "量",
+                contrastRatio: "コントラスト比", canvasBg: "キャンバス背景",
+                creditTitle: "クレジットと情報",
+                creditDescription: "本プロジェクトの実現は次の貢献なしには不可能でした：",
+                poweredBy: "開発:", apply: "適用", none: "なし", gaussian: "ガウス", motion: "モーション"
+            },
+            yue: {
+                appName: "Kerach Go", controls: "控制", shader: "着色器", palette: "調色盤", mix: "混合",
+                brightness: "亮度", language: "語言", text: "文字", content: "內容",
+                fontFamily: "字體", fontSize: "字體大小", fontWeight: "字重",
+                offsetX: "橫向偏移", offsetY: "縱向偏移", appearance: "外觀",
+                activeShader: "啟用着色器", effects: "效果", blurType: "模糊類型",
+                blurStrength: "模糊強度", blurAngle: "模糊角度", noiseType: "噪音類型", noiseStrength: "噪音強度",
+                melt: "融化", flow: "流動", balatro: "Balatro", glass: "迷幻玻璃", chargedCells: "帶電單元",
+                hue: "色相", saturation: "飽和度", contrast: "對比度", zoom: "縮放",
+                speed: "速度", detail: "細節", velocity: "速度", twist: "扭曲", colorOffset: "顏色偏移",
+                lighting: "光照", spinAmount: "旋轉量", pixelFilter: "像素濾鏡",
+                rotateView: "旋轉視圖", sides: "邊數", density: "密度", glow: "光暈", scale: "比例",
+                tintColor: "色調顏色", shaderColors: "着色器顏色", cellColors: "單元格顏色",
+                temporalOverride: "時間覆蓋", time: "時間", spinRotation: "旋轉角度",
+                spinSpeed: "旋轉速度", spinEase: "旋轉平滑", config: "設定",
+                export: "導出", import: "導入", exportConfig: "導出設定",
+                importConfig: "導入設定", pasteJson: "貼上設定 JSON...", baseColor: "基礎顏色",
+                mode: "模式", output: "輸出", analogous: "類似色", triad: "三色組",
+                complementary: "互補色", splitComp: "分割互補色", square: "四色組",
+                tetradic: "四元色", monochromatic: "單色", firstColor: "第一種顏色",
+                secondColor: "第二種顏色", steps: "步驟", mixMode: "混合模式",
+                lighten: "變亮", darken: "變暗", amount: "量", contrastRatio: "對比率", canvasBg: "畫布背景",
+                creditTitle: "致謝與資訊",
+                creditDescription: "呢個專案冇以下人士幫手就唔會存在：",
+                poweredBy: "開發者", apply: "應用", none: "無", gaussian: "高斯", motion: "移動"
+            }
+        };
 
         const { useState, useEffect, useRef, useCallback, useMemo, createContext, useContext } = React;
         const { motion, AnimatePresence } = window.Motion;
@@ -773,6 +917,213 @@
                         </div>
                     </div>
                 </div>
+            );
+        };
+
+        function ToggleSwitch({ checked, onChange, label, isRTL = false }) {
+            return (
+                <div
+                className="flex items-center justify-between w-full"
+                style={{ direction: isRTL ? "rtl" : "ltr" }}
+                >
+                <span className="text-xs text-gray-400 font-medium">{label}</span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => onChange(e.target.checked)}
+                    className="sr-only peer"
+                    />
+                    <div
+                    className={`w-11 h-6 rounded-full transition-all
+                        ${checked ? "bg-accent" : "bg-gray-700"}`}
+                    ></div>
+                    <div
+                    className={`absolute top-0.5 ${
+                        isRTL ? "right-0.5 peer-checked:translate-x-[-20px]" : "left-0.5 peer-checked:translate-x-[20px]"
+                    } bg-white w-5 h-5 rounded-full transition-transform`}
+                    ></div>
+                </label>
+                </div>
+            );
+        }
+
+        // =========================================================================
+        // LanguagePopupTrigger (Refined)
+        // =========================================================================
+        const LanguagePopupTrigger = ({ language, setLanguage, dir }) => {
+            const [isOpen, setIsOpen] = React.useState(false);
+            const [tempLang, setTempLang] = React.useState(language);
+            const buttonRef = React.useRef(null);
+            const isRTL = dir === "rtl";
+
+            const languages = [
+                { value: "en", label: "English", applyText: "Apply" },
+                { value: "he", label: "עברית", applyText: "החל" },
+                { value: "it", label: "Italiano", applyText: "Applica" },
+                { value: "es", label: "Español", applyText: "Aplicar" },
+                { value: "pt", label: "Português", applyText: "Aplicar" },
+                { value: "ja", label: "日本語", applyText: "適用" },
+                { value: "yue", label: "粵語", applyText: "應用" }
+            ];
+
+            React.useEffect(() => setTempLang(language), [language]);
+
+            const handleApply = () => {
+                setLanguage(tempLang);
+                setIsOpen(false);
+            };
+
+            const currentApplyText =
+                languages.find((l) => l.value === tempLang)?.applyText || "Apply";
+
+            return (
+                <>
+                {/* Trigger Icon Button */}
+                <button
+                    ref={buttonRef}
+                    onClick={(e) => {
+                    e.stopPropagation();
+                    setIsOpen((prev) => !prev);
+                    }}
+                    style={{
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "white",
+                    padding: "6px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    transition: "color 0.25s ease",
+                    }}
+                    onMouseEnter={(e) =>
+                    (e.currentTarget.style.color = "var(--accent,#39bdff)")
+                    }
+                    onMouseLeave={(e) => (e.currentTarget.style.color = "white")}
+                    aria-label="Select language"
+                >
+                    <Icon name="globe" size={20} />
+                </button>
+
+                {/* Modal */}
+                {isOpen &&
+                    ReactDOM.createPortal(
+                    <>
+                        {/* Glass Overlay */}
+                        <div
+                        onClick={() => setIsOpen(false)}
+                        className="glass-panel"
+                        style={{
+                            position: "fixed",
+                            inset: 0,
+                            zIndex: 9998,
+                        }}
+                        />
+
+                        {/* Modal Box */}
+                        <div
+                        style={{
+                            position: "fixed",
+                            top: "50%",
+                            left: "50%",
+                            transform: "translate(-50%, -50%)",
+                            background: "#0e0e0e",
+                            border: "1px solid rgba(255,255,255,0.1)",
+                            borderRadius: "12px",
+                            width: "90%",
+                            maxWidth: "280px",
+                            padding: "1rem 1.5rem",
+                            boxShadow: "0 10px 25px rgba(0,0,0,0.6)",
+                            zIndex: 9999,
+                            color: "#fff",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                        }}
+                        >
+                        <span
+                            style={{
+                            fontSize: "20px",
+                            fontWeight: 600,
+                            marginBottom: "1.5rem",
+                            textAlign: "center",
+                            }}
+                        >
+                            Language
+                        </span>
+
+                        <div
+                            style={{
+                            width: "100%",
+                            border: "1px solid rgba(255,255,255,0.1)",
+                            borderRadius: "8px",
+                            marginBottom: "1.75rem",
+                            background: "rgba(0,0,0,0.5)",
+                            }}
+                        >
+                            {languages.map((lang) => (
+                            <button
+                                key={lang.value}
+                                onClick={() => setTempLang(lang.value)}
+                                style={{
+                                width: "100%",
+                                padding: "10px 0",
+                                fontSize: "14px",
+                                background:
+                                    tempLang === lang.value
+                                    ? "var(--accent,#39bdff)"
+                                    : "transparent",
+                                color: tempLang === lang.value ? "#000" : "#ccc",
+                                fontWeight: tempLang === lang.value ? "600" : "400",
+                                border: "none",
+                                textAlign: "center",
+                                cursor: "pointer",
+                                transition: "background 0.2s,color 0.2s",
+                                borderRadius: "6px",
+                                }}
+                                onMouseEnter={(e) => {
+                                if (tempLang !== lang.value)
+                                    e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+                                }}
+                                onMouseLeave={(e) => {
+                                if (tempLang !== lang.value)
+                                    e.currentTarget.style.background = "transparent";
+                                }}
+                            >
+                                {lang.label}
+                            </button>
+                            ))}
+                        </div>
+
+                        <button
+                            onClick={handleApply}
+                            style={{
+                            width: "100%",
+                            background: "var(--accent,#39bdff)",
+                            border: "none",
+                            color: "#000",
+                            fontWeight: "700",
+                            fontSize: "14px",
+                            borderRadius: "8px",
+                            padding: "12px 0",
+                            cursor: "pointer",
+                            transition: "background 0.2s",
+                            }}
+                            onMouseEnter={(e) =>
+                            (e.currentTarget.style.background = "#4bd8ff")
+                            }
+                            onMouseLeave={(e) =>
+                            (e.currentTarget.style.background = "var(--accent,#39bdff)")
+                            }
+                        >
+                            {currentApplyText}
+                        </button>
+                        </div>
+                    </>,
+                    document.body
+                    )}
+                </>
             );
         };
 
@@ -1024,6 +1375,8 @@
 [Chronicle Button](https://codepen.io/Haaguitos/pen/OJrVZdJ) by [Haaguitos](https://codepen.io/Haaguitos)
 
 [すりガラスなプロフィールカード](https://codepen.io/ash_creator/pen/zYaPZLB) by [あしざわ - Webクリエイター](https://codepen.io/ash_creator)
+
+[Simple switch with led indicator](https://codepen.io/cbolson/pen/qBeyKre) by [Chris Bolson](https://codepen.io/cbolson)
 
 [react@18](https://unpkg.com/react@18/umd/react.production.min.js)
 
@@ -1362,23 +1715,24 @@
                 };
 
                 if (type === 'balatro') {
-                    baseFragment = balatroFragShader;
-                    Object.assign(uniforms, {
-                        uSpeed: { value: 1.0 },
-                        uSpinRotation: { value: -2.0 },
-                        uSpinSpeed: { value: 7.0 },
-                        uColor1: { value: new THREE.Vector3(0.87, 0.26, 0.23) },
-                        uColor2: { value: new THREE.Vector3(0.0, 0.42, 0.70) },
-                        uColor3: { value: new THREE.Vector3(0.08, 0.13, 0.14) },
-                        uLighting: { value: 0.4 },
-                        uSpinAmount: { value: 0.25 },
-                        uPixelFilter: { value: 745.0 },
-                        uSpinEase: { value: 1.0 },
-                        uIsRotate: { value: false },
-                        uHue: { value: 0.0 },
-                        uSaturation: { value: 1.0 },
-                        uContrast: { value: 1.0 },
-                    });
+                baseFragment = balatroFragShader;
+                Object.assign(uniforms, {
+                    uTime: { value: 0.0 },
+                    uResolution: { value: new THREE.Vector2() },
+                    uSpinRotation: { value: -2.0 },
+                    uSpinSpeed: { value: 7.0 },
+                    uColor1: { value: new THREE.Vector3(0.87, 0.26, 0.23) },
+                    uColor2: { value: new THREE.Vector3(0.0, 0.42, 0.70) },
+                    uColor3: { value: new THREE.Vector3(0.08, 0.13, 0.14) },
+                    uContrast: { value: 3.5 },
+                    uLighting: { value: 0.4 },
+                    uSpinAmount: { value: 0.25 },
+                    uPixelFilter: { value: 745.0 },
+                    uSpinEase: { value: 1.0 },
+                    uIsRotate: { value: false },
+                    uHue: { value: 0.0 },
+                    uSaturation: { value: 1.0 },
+                });
                 } else if (type === 'glass') {
                     baseFragment = psychedelicGlassFragShader;
                     Object.assign(uniforms, {
@@ -1511,7 +1865,7 @@
 
                     if (materialRef.current) {
                         const mat = materialRef.current;
-                        if (mat.uniforms.uTime) mat.uniforms.uTime.value = elapsed;
+                        if (mat.uniforms.uTime) mat.uniforms.uTime.value = elapsed * cur.balatro.speed;
                         if (mat.uniforms.uResolution)
                             mat.uniforms.uResolution.value.set(clientWidth * dpr, clientHeight * dpr);
 
@@ -1538,7 +1892,7 @@
                             mat.uniforms.uSaturation.value = cur.flow.saturation;
 
                         } else if (cur.activeShader === 'balatro') {
-                            mat.uniforms.uSpeed.value = cur.balatro.speed;
+                            mat.uniforms.uTime.value = elapsed * cur.balatro.speed;
                             mat.uniforms.uSpinRotation.value = cur.balatro.spinRotation;
                             mat.uniforms.uSpinSpeed.value = cur.balatro.spinSpeed;
                             mat.uniforms.uContrast.value = cur.balatro.contrast;
@@ -1550,9 +1904,8 @@
                             mat.uniforms.uColor1.value.set(...cur.balatro.color1);
                             mat.uniforms.uColor2.value.set(...cur.balatro.color2);
                             mat.uniforms.uColor3.value.set(...cur.balatro.color3);
-                            mat.uniforms.uHue.value = cur.balatro.hue;
-                            mat.uniforms.uSaturation.value = cur.balatro.saturation;
-                            mat.uniforms.uContrast.value = cur.balatro.contrast;
+                            if (mat.uniforms.uHue) mat.uniforms.uHue.value = cur.balatro.hue;
+                            if (mat.uniforms.uSaturation) mat.uniforms.uSaturation.value = cur.balatro.saturation;
 
                         } else if (cur.activeShader === 'glass') {
                             mat.uniforms.uSpeed.value = cur.glass.speed;
@@ -1621,6 +1974,8 @@
                 glass: { speed: 0.8, sides: 6, hue: 0, saturation: 1, contrast: 1, density: 15.0, glow: 1.2 },
                 chargedCells: { speed: 1.0, scale: 5.0, hue: 0, saturation: 1, color1: [0.18, 0.7, 0.4], color2: [0.58, 1.0, 0.15], color3: [0.0, 0.65, 0.31] },
                 blurStrength: 0.0,
+                isFrozen: false,
+                manualTime: 0,
             };
             const [settings, setSettings] = useState(defaultSettings);
             const [canvasBg, setCanvasBg] = useState("#000000");
@@ -1690,13 +2045,25 @@
                 
                 {/* Sidebar Header */}
                 <div className="flex-none p-4 border-b border-white/10 flex items-center justify-between">
-                <a href="/" className="flex items-center">
+                    <a 
+                    href="/" 
+                    className="flex items-center"
+                    onMouseEnter={(e) => {
+                        e.currentTarget.querySelector('h1')?.style.setProperty('color', 'var(--accent,#39bdff)', 'important');
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.querySelector('h1')?.style.setProperty('color', 'white', 'important');
+                    }}
+                    >
                     <img src="logo.png" alt="Logo" className="w-[28px] h-[28px]" />
-                    <h1 className="text-xl mx-2 font-bold bg-clip-text text-transparent bg-white">
-                    {t('appName')}
+                    <h1 className="text-xl mx-2 font-bold text-white transition-colors duration-300 ease-in-out">
+                        {t('appName')}
                     </h1>
-                </a>
+                    </a>
+                    {/* Language Icon Trigger */}
+                    <LanguagePopupTrigger language={language} setLanguage={setLanguage} dir={dir} />
                 </div>
+
 
                 {/* Tabs */}
                 <div className="flex-none flex items-center space-x-1 px-4 py-2 border-b border-white/10 overflow-x-auto no-scrollbar">
@@ -1715,16 +2082,6 @@
 
                 {/* Scrollable Content */}
                 <div className="flex-grow overflow-y-auto p-6 space-y-6">
-                    {t('language')}
-                    <StaticSelect
-                        options={[
-                            { value: 'en', label: 'English' },
-                            { value: 'he', label: 'עברית' },
-                            { value: 'it', label: 'Italiano' },
-                        ]}
-                        selectedValue={language}
-                        onChange={setLanguage}
-                    />
                     {/* TAB: CONTROLS */}
                     {activeTab === 'controls' && (
                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
@@ -1835,7 +2192,7 @@
                             <>
                             <ShaderSlider label={t('zoom')} value={settings.melt.zoom} min={0.1} max={32} step={0.1}
                                 update={v => updateNested('melt', 'zoom', v)} dir={dir} />
-                            <ShaderSlider label={t('speed')} value={settings.melt.speed} min={0} max={2} step={0.05}
+                            <ShaderSlider label={t('speed')} value={settings.melt.speed} min={0} max={12} step={0.01}
                                 update={v => updateNested('melt', 'speed', v)} dir={dir} />
                             <ShaderSlider label={t('hue')} value={settings.melt.hue} min={0} max={360} step={1}
                                 update={v => updateNested('melt', 'hue', v)} dir={dir} />
@@ -1848,26 +2205,36 @@
 
                         {/* BALATRO SHADER */}
                         {settings.activeShader === 'balatro' && (
-                            <>
+                        <>
                             <ShaderSlider label={t('speed')} value={settings.balatro.speed} min={0} max={5} step={0.1}
-                                update={v => updateNested('balatro', 'speed', v)} dir={dir} />
-                            <ShaderSlider label={t('contrast')} value={settings.balatro.contrast} min={0} max={5} step={0.1}
-                                update={v => updateNested('balatro', 'contrast', v)} dir={dir} />
+                            update={v => updateNested('balatro', 'speed', v)} dir={dir} />
+                            <ShaderSlider label={t('spinRotation')} value={settings.balatro.spinRotation} min={-10} max={10} step={0.1}
+                            update={v => updateNested('balatro', 'spinRotation', v)} dir={dir} />
+                            <ShaderSlider label={t('spinSpeed')} value={settings.balatro.spinSpeed} min={0} max={15} step={0.1}
+                            update={v => updateNested('balatro', 'spinSpeed', v)} dir={dir} />
                             <ShaderSlider label={t('spinAmount')} value={settings.balatro.spinAmount} min={-2} max={2} step={0.05}
-                                update={v => updateNested('balatro', 'spinAmount', v)} dir={dir} />
+                            update={v => updateNested('balatro', 'spinAmount', v)} dir={dir} />
+                            <ShaderSlider label={t('contrast')} value={settings.balatro.contrast} min={0} max={5} step={0.1}
+                            update={v => updateNested('balatro', 'contrast', v)} dir={dir} />
+                            <ShaderSlider label={t('lighting')} value={settings.balatro.lighting} min={0} max={2} step={0.05}
+                            update={v => updateNested('balatro', 'lighting', v)} dir={dir} />
+                            <ShaderSlider label={t('pixelFilter')} value={settings.balatro.pixelFilter} min={10} max={1500} step={5}
+                            update={v => updateNested('balatro', 'pixelFilter', v)} dir={dir} />
+                            <ShaderSlider label={t('spinEase')} value={settings.balatro.spinEase} min={0} max={5} step={0.1}
+                            update={v => updateNested('balatro', 'spinEase', v)} dir={dir} />
 
                             <div className="flex flex-wrap gap-6 mt-4">
-                                {['color1', 'color2', 'color3'].map((col, i) => (
+                            {['color1', 'color2', 'color3'].map((col, i) => (
                                 <div key={col} className="flex-1 min-w-[300px] space-y-2">
-                                    <span className="text-xs uppercase text-gray-500">Color {i + 1}</span>
-                                    <ColorPicker
+                                <span className="text-xs uppercase text-gray-500">Color {i + 1}</span>
+                                <ColorPicker
                                     color={rgbArrayToHex(settings.balatro[col])}
                                     onChange={h => updateNested('balatro', col, hexToRgbArray(h))}
-                                    />
+                                />
                                 </div>
-                                ))}
+                            ))}
                             </div>
-                            </>
+                        </>
                         )}
 
                         {/* GLASS SHADER */}
@@ -2000,13 +2367,56 @@
                             />
                             </div>
                         </div>
+
+                        {/* State Override & Manual Time Controls */}
+                        <div className="space-y-3 pt-4 border-t border-white/10">
+                        <ToggleSwitch
+                            checked={settings.isFrozen}
+                            onChange={(v) => handleSlider("isFrozen", v)}
+                            label={t("temporalOverride")}
+                            isRTL={dir === "rtl"}
+                        />
+
+                        {settings.isFrozen && (
+                            <div>
+                            <label className="text-xs text-gray-400 mb-1 flex justify-between">
+                                <span>{t("time")}</span>
+                                <span className="text-accent">{settings.manualTime.toFixed(2)}</span>
+                            </label>
+                            <CustomSlider
+                                min={0}
+                                max={120}
+                                step={0.1}
+                                value={settings.manualTime}
+                                onValueChange={(v) => handleSlider("manualTime", v)}
+                                isRTL={dir === "rtl"}
+                            />
+                            </div>
+                        )}
+                        </div>
+
                         <div className="flex flex-col items-center space-y-6">
                         <NamerUiBadge
                             poweredByText={t('poweredBy')}
                             namerUIName={dir === 'rtl' ? 'נמר UI' : 'Namer UI'}
                             isRTL={dir === 'rtl'}
                         />
-                        </div>        
+                        </div>
+                        <div className="flex flex-col items-center space-y-6">
+                            <a
+                                href="https://www.producthunt.com/products/kerach-go?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-kerach-go"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                                <img
+                                    src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1050059&theme=neutral&t=1765790502382"
+                                    alt="Kerach Go - A text shaderer whose entire code fits into a single file | Product Hunt"
+                                    style={{ width: "250px", height: "54px" }}
+                                    width="250"
+                                    height="54"
+                                />
+                            </a>
+                        </div> 
                         <div className="glass-panel p-6 rounded-squircle mt-12 text-xs text-gray-300">
                             <h3 className="font-bold text-lg mb-2 text-white">{t('creditTitle')}</h3>
                             <p className="text-gray-400 text-sm mb-4">{t('creditDescription')}</p>
