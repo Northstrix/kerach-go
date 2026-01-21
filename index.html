@@ -549,6 +549,87 @@
         gl_FragColor = vec4(color, 1.0);
         }`;
 
+        const luminousResinFragShader = `precision highp float;
+        uniform float uTime;
+        uniform vec2 uResolution;
+        uniform float uSpeed;
+        uniform float uDripStrength;
+        uniform float uScale;
+        uniform float uGooeyness;
+        uniform float uHue;
+        uniform float uSaturation;
+        uniform vec3 uColor1;
+        uniform vec3 uColor2;
+        uniform vec3 uColor3;
+
+        ${hueSatHelpers}
+
+        vec2 hash(vec2 p) {
+            p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+            return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+        }
+
+        float noise(vec2 p) {
+            const float K1 = 0.366025404;
+            const float K2 = 0.211324865;
+            vec2 i = floor(p + (p.x + p.y) * K1);
+            vec2 a = p - i + (i.x + i.y) * K2;
+            vec2 o = (a.x > a.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+            vec2 b = a - o + K2;
+            vec2 c = a - 1.0 + 2.0 * K2;
+            vec3 h = max(0.5 - vec3(dot(a, a), dot(b, b), dot(c, c)), 0.0);
+            vec3 n = h * h * h * h * vec3(dot(a, hash(i + 0.0)), dot(b, hash(i + o)), dot(c, hash(i + 1.0)));
+            return dot(n, vec3(70.0));
+        }
+
+        float fbm(vec2 p) {
+            float f = 0.0;
+            float amp = 0.5;
+            for(int i = 0; i < 6; i++) {
+                f += amp * noise(p);
+                p *= 2.02;
+                amp *= 0.5;
+            }
+            return f;
+        }
+
+        vec3 resinPalette(float t) {
+            t = clamp(t, 0.0, 1.0);
+            if (t < 0.5) {
+                return mix(uColor1, uColor2, t * 2.0);
+            } else {
+                return mix(uColor2, uColor3, (t - 0.5) * 2.0);
+            }
+        }
+
+        void main() {
+            vec2 uv = (gl_FragCoord.xy * 2.0 - uResolution.xy) / min(uResolution.x, uResolution.y);
+            float t = uTime * uSpeed;
+
+            // Dripping logic
+            float d = fbm(vec2(uv.x * 0.5, t * 0.2)) * uDripStrength;
+            uv.y -= d;
+
+            // Domain Warping for gooey effect
+            vec2 q = vec2(fbm(uv * uScale + t), fbm(uv * uScale + vec2(5.2, 1.3) + t));
+            vec2 r = vec2(fbm(uv * uScale + uGooeyness * q + 0.15 * t), fbm(uv * uScale + uGooeyness * q + 0.12 * t));
+            float f = fbm(uv * uScale + uGooeyness * r);
+
+            // Color mixing
+            vec3 color = resinPalette(clamp(f + length(q), 0.0, 1.0));
+            
+            // Add dark contrast "valleys"
+            color *= smoothstep(-0.2, 0.8, f + 0.3);
+
+            // Apply Hue/Sat adjustments
+            vec3 hsv = rgb2hsv(color);
+            hsv.x += uHue / 360.0;
+            hsv.y *= uSaturation;
+            color = hsv2rgb(hsv);
+
+            gl_FragColor = vec4(color, 1.0);
+        }`;
+
         // =========================================================================
         // LOCALIZATION
         // =========================================================================
@@ -584,7 +665,11 @@
                 creditTitle: "Credits & Info",
                 creditDescription: "The existence of this project wouldn't have been possible without the following:",
                 poweredBy: "Powered by", apply: "Apply", none: "None",
-                gaussian: "Gaussian", motion: "Motion"
+                gaussian: "Gaussian", motion: "Motion",
+                luminousResin: "Luminous Resin",
+                dripStrength: "Drip Strength",
+                gooeyness: "Gooeyness",
+                resinColors: "Resin Colors"
             },
             he: {
                 appName: "קרח Go",
@@ -614,7 +699,11 @@
                 creditTitle: "קרדיטים ומידע",
                 creditDescription: "קיומו של הפרויקט הזה לא היה אפשרי בלעדי:",
                 poweredBy: "מופעל ע״י", apply: "החל", none: "ללא",
-                gaussian: "גאוסיאני", motion: "תנועה"
+                gaussian: "גאוסיאני", motion: "תנועה",
+                luminousResin: "שרף זוהר",
+                dripStrength: "עוצמת טפטוף",
+                gooeyness: "צמיגיות",
+                resinColors: "צבעי שרף"
             },
             it: {
                 appName: "Kerach Go",
@@ -644,7 +733,11 @@
                 creditTitle: "Crediti e Info",
                 creditDescription: "L'esistenza di questo progetto non sarebbe stata possibile senza:",
                 poweredBy: "Creato con", apply: "Applica", none: "Nessuno",
-                gaussian: "Gaussiano", motion: "Movimento"
+                gaussian: "Gaussiano", motion: "Movimento",
+                luminousResin: "Resina Luminosa",
+                dripStrength: "Forza Gocciolamento",
+                gooeyness: "Viscosità",
+                resinColors: "Colori Resina"
             },
             es: {
                 appName: "Kerach Go",
@@ -674,7 +767,11 @@
                 creditTitle: "Créditos e Información",
                 creditDescription: "La existencia de este proyecto no habría sido posible sin lo siguiente:",
                 poweredBy: "Desarrollado por", apply: "Aplicar", none: "Ninguno",
-                gaussian: "Gaussiano", motion: "Movimiento"
+                gaussian: "Gaussiano", motion: "Movimiento",
+                luminousResin: "Resina Luminosa",
+                dripStrength: "Fuerza de Goteo",
+                gooeyness: "Viscosidad",
+                resinColors: "Colores de Resina"
             },
             pt: {
                 appName: "Kerach Go",
@@ -704,7 +801,11 @@
                 creditTitle: "Créditos e Informações",
                 creditDescription: "A existência deste projeto não seria possível sem o seguinte:",
                 poweredBy: "Desenvolvido por", apply: "Aplicar", none: "Nenhum",
-                gaussian: "Gaussiano", motion: "Movimento"
+                gaussian: "Gaussiano", motion: "Movimento",
+                luminousResin: "Resina Luminosa",
+                dripStrength: "Força de Gotejamento",
+                gooeyness: "Viscosidade",
+                resinColors: "Cores da Resina"
             },
             ja: {
                 appName: "Kerach Go", controls: "コントロール", shader: "シェーダー", palette: "パレット", mix: "ミックス",
@@ -732,7 +833,11 @@
                 contrastRatio: "コントラスト比", canvasBg: "キャンバス背景",
                 creditTitle: "クレジットと情報",
                 creditDescription: "本プロジェクトの実現は次の貢献なしには不可能でした：",
-                poweredBy: "開発:", apply: "適用", none: "なし", gaussian: "ガウス", motion: "モーション"
+                poweredBy: "開発:", apply: "適用", none: "なし", gaussian: "ガウス", motion: "モーション",
+                luminousResin: "ルミナスレジン",
+                dripStrength: "ドリップの強さ",
+                gooeyness: "ねばねば感",
+                resinColors: "レジンの色"
             },
             yue: {
                 appName: "Kerach Go", controls: "控制", shader: "着色器", palette: "調色盤", mix: "混合",
@@ -758,7 +863,11 @@
                 lighten: "變亮", darken: "變暗", amount: "量", contrastRatio: "對比率", canvasBg: "畫布背景",
                 creditTitle: "致謝與資訊",
                 creditDescription: "呢個專案冇以下人士幫手就唔會存在：",
-                poweredBy: "開發者", apply: "應用", none: "無", gaussian: "高斯", motion: "移動"
+                poweredBy: "開發者", apply: "應用", none: "無", gaussian: "高斯", motion: "移動",
+                luminousResin: "發光樹脂",
+                dripStrength: "滴落強度",
+                gooeyness: "粘稠度",
+                resinColors: "樹脂顏色"
             }
         };
 
@@ -1401,6 +1510,8 @@
 [Non liquid glass](https://codepen.io/lekzd/pen/dPGYjdj) by [Alexander Korotaev](https://codepen.io/lekzd)
 
 [Floating voronoi lines](https://codepen.io/lekzd/pen/xbwMMzR) by [Alexander Korotaev](https://codepen.io/lekzd)
+
+[Unnamed Luminous Material](https://x.com/gibkun1/status/2013734035454042547) by [タツキ｜サムネ顧問](https://x.com/gibkun1)
         `;
 
         function CreditHighlightHover({ children, href, className }) {
@@ -1765,6 +1876,17 @@
                         uSaturation: { value: 1.0 },
                         uContrast: { value: 1.0 },
                     });
+                } else if (type === 'luminousResin') {
+                    baseFragment = luminousResinFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 0.4 },
+                        uDripStrength: { value: 1.5 },
+                        uScale: { value: 2.5 },
+                        uGooeyness: { value: 4.0 },
+                        uColor1: { value: new THREE.Vector3(0.0, 0.8, 1.0) },
+                        uColor2: { value: new THREE.Vector3(0.5, 0.0, 1.0) },
+                        uColor3: { value: new THREE.Vector3(1.0, 0.0, 0.5) },
+                    });
                 } else {
                     baseFragment = meltFragShader;
                     Object.assign(uniforms, {
@@ -1925,6 +2047,17 @@
                             mat.uniforms.uColor1.value.set(...cur.chargedCells.color1);
                             mat.uniforms.uColor2.value.set(...cur.chargedCells.color2);
                             mat.uniforms.uColor3.value.set(...cur.chargedCells.color3);
+                        
+                        } else if (cur.activeShader === 'luminousResin') {
+                            mat.uniforms.uSpeed.value = cur.luminousResin.speed;
+                            mat.uniforms.uDripStrength.value = cur.luminousResin.dripStrength;
+                            mat.uniforms.uScale.value = cur.luminousResin.scale;
+                            mat.uniforms.uGooeyness.value = cur.luminousResin.gooeyness;
+                            mat.uniforms.uHue.value = cur.luminousResin.hue;
+                            mat.uniforms.uSaturation.value = cur.luminousResin.saturation;
+                            mat.uniforms.uColor1.value.set(...cur.luminousResin.color1);
+                            mat.uniforms.uColor2.value.set(...cur.luminousResin.color2);
+                            mat.uniforms.uColor3.value.set(...cur.luminousResin.color3);
                         }
                     }
 
@@ -1973,6 +2106,17 @@
                 balatro: { speed: 1, spinRotation: -2.0, spinSpeed: 7.0, contrast: 3.5, lighting: 0.4, spinAmount: 0.25, pixelFilter: 745.0, spinEase: 1.0, isRotate: false, color1: [0.871, 0.267, 0.231], color2: [0.0, 0.42, 0.706], color3: [0.086, 0.137, 0.145] },
                 glass: { speed: 0.8, sides: 6, hue: 0, saturation: 1, contrast: 1, density: 15.0, glow: 1.2 },
                 chargedCells: { speed: 1.0, scale: 5.0, hue: 0, saturation: 1, color1: [0.18, 0.7, 0.4], color2: [0.58, 1.0, 0.15], color3: [0.0, 0.65, 0.31] },
+                luminousResin: { 
+                    speed: 0.06, 
+                    dripStrength: 1.1, 
+                    scale: 0.4, 
+                    gooeyness: 1.0, 
+                    hue: 0, 
+                    saturation: 1.2,
+                    color1: [0.0, 0.584, 1.0],
+                    color2: [0.086, 0.773, 0.306],
+                    color3: [0.961, 0.286, 0.020]
+                },
                 blurStrength: 0.0,
                 isFrozen: false,
                 manualTime: 0,
@@ -2173,15 +2317,15 @@
 
                         {/* Shader Select */}
                         <div className="space-y-3 pt-4 border-t border-white/10">
-                        <StaticSelect
-                            label={t('activeShader')}
-                            options={['melt', 'flow', 'balatro', 'glass', 'chargedCells'].map(v => ({
-                            value: v,
-                            label: v,
-                            }))}
-                            selectedValue={settings.activeShader}
-                            onChange={v => handleSlider('activeShader', v)}
-                        />
+                            <StaticSelect
+                                label={t('activeShader')}
+                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin'].map(v => ({
+                                    value: v,
+                                    label: v === 'luminousResin' ? t('luminousResin') : t(v),
+                                }))}
+                                selectedValue={settings.activeShader}
+                                onChange={v => handleSlider('activeShader', v)}
+                            />
                         </div>
 
                         {/* Specific Shader Controls */}
@@ -2346,6 +2490,36 @@
                                 </div>
                                 ))}
                             </div>
+                            </>
+                        )}
+
+                        {/* LUMINOUS RESIN CONTROLS */}
+                        {settings.activeShader === 'luminousResin' && (
+                            <>
+                                <ShaderSlider label={t('speed')} value={settings.luminousResin.speed} min={0} max={2} step={0.01}
+                                    update={v => updateNested('luminousResin', 'speed', v)} dir={dir} />
+                                <ShaderSlider label="Drip Strength" value={settings.luminousResin.dripStrength} min={0} max={5} step={0.1}
+                                    update={v => updateNested('luminousResin', 'dripStrength', v)} dir={dir} />
+                                <ShaderSlider label={t('scale')} value={settings.luminousResin.scale} min={0.1} max={10} step={0.1}
+                                    update={v => updateNested('luminousResin', 'scale', v)} dir={dir} />
+                                <ShaderSlider label="Gooeyness" value={settings.luminousResin.gooeyness} min={0.1} max={10} step={0.1}
+                                    update={v => updateNested('luminousResin', 'gooeyness', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.luminousResin.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('luminousResin', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.luminousResin.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('luminousResin', 'saturation', v)} dir={dir} />
+
+                                <div className="flex flex-wrap gap-6 mt-4">
+                                    {['color1', 'color2', 'color3'].map((col, i) => (
+                                        <div key={col} className="flex-1 min-w-[300px] space-y-2">
+                                            <span className="text-xs uppercase text-gray-500">Resin Color {i + 1}</span>
+                                            <ColorPicker
+                                                color={rgbArrayToHex(settings.luminousResin[col])}
+                                                onChange={h => updateNested('luminousResin', col, hexToRgbArray(h))}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
                             </>
                         )}
                         </div>
@@ -2738,15 +2912,3 @@
     </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
