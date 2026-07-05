@@ -5,9 +5,11 @@ SourceForge: https://sourceforge.net/projects/kerach-go/
 
 Link: https://northstrix.github.io/kerach-go/
 
-![Alt App Logo](https://raw.githubusercontent.com/Northstrix/kerach-go/refs/heads/main/preview.webp)
+![Alt First Preview](https://raw.githubusercontent.com/Northstrix/kerach-go/refs/heads/main/preview.webp)
 
-![Alt App Logo](https://raw.githubusercontent.com/Northstrix/kerach-go/refs/heads/main/preview_2.webp)
+![Alt Second Preview](https://raw.githubusercontent.com/Northstrix/kerach-go/refs/heads/main/preview_2.webp)
+
+![Alt Third Preview](https://raw.githubusercontent.com/Northstrix/kerach-go/refs/heads/main/preview_3.webp)
 
 The app itself is distributed under the MIT license; the shaders may be covered by other licenses.
 
@@ -52,6 +54,8 @@ The app is fully localized into:
 
 [radix-ui](https://www.npmjs.com/package/radix-ui)
 
+[Google Gemini](https://gemini.google.com/)
+
 [Input Floating Label animation](https://codepen.io/Mahe76/pen/qBQgXyK) by [Elpeeda](https://codepen.io/Mahe76)
 
 [GradientGen](https://github.com/noegarsoux/GradientGen) by [noegarsoux](https://github.com/noegarsoux)
@@ -61,3 +65,9 @@ The app is fully localized into:
 [Non liquid glass](https://codepen.io/lekzd/pen/dPGYjdj) by [Alexander Korotaev](https://codepen.io/lekzd)
 
 [Floating voronoi lines](https://codepen.io/lekzd/pen/xbwMMzR) by [Alexander Korotaev](https://codepen.io/lekzd)
+
+[Unnamed Luminous Material](https://x.com/gibkun1/status/2013734035454042547) by [タツキ｜サムネ顧問](https://x.com/gibkun1)
+
+[swirl](https://shaders.paper.design/swirl) by [Paper Shaders](https://shaders.paper.design/)
+
+[shaders](https://github.com/paper-design/shaders) by [paper design](https://github.com/paper-design)
