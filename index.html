@@ -630,6 +630,136 @@
             gl_FragColor = vec4(color, 1.0);
         }`;
 
+        const swirlFragShader = `
+            precision highp float;
+            uniform float uTime;
+            uniform vec2 uResolution;
+            uniform float uSpeed;
+            uniform vec4 uColorBack;
+            uniform vec4 uColors[7];
+            uniform float uColorCount;
+            uniform float uBandCount;
+            uniform float uTwist;
+            uniform float uCenter;
+            uniform float uProportion;
+            uniform float uSoftness;
+            uniform float uNoise;
+            uniform float uNoiseFrequency;
+            uniform float uHue;
+            uniform float uSaturation;
+
+            const float TWO_PI = 6.28318530718;
+
+            vec3 rgb2hsv(vec3 c) {
+                vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+                vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+                vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+                float d = q.x - min(q.w, q.y);
+                float e = 1.0e-10;
+                return vec3( abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x );
+            }
+
+            vec3 hsv2rgb(vec3 c) {
+                vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+                vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+                return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+            }
+
+            vec3 permute(vec3 x) { 
+                return mod(((x * 34.0) + 1.0) * x, 289.0); 
+            }
+
+            float snoise(vec2 v) {
+                const vec4 C = vec4(
+                    0.211324865405187, 0.366025403784439,
+                    -0.577350269189626, 0.024390243902439
+                );
+                vec2 i  = floor(v + dot(v, C.yy));
+                vec2 x0 = v - i + dot(i, C.xx);
+                vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+                vec4 x12 = x0.xyxy + C.xxzz;
+                x12.xy -= i1;
+                i = mod(i, 289.0);
+                vec3 p = permute( permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0) );
+                vec3 m = max( 0.5 - vec3( dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw) ), 0.0 );
+                m = m * m;
+                m = m * m;
+                vec3 x = 2.0 * fract(p * C.www) - 1.0;
+                vec3 h = abs(x) - 0.5;
+                vec3 ox = floor(x + 0.5);
+                vec3 a0 = x - ox;
+                m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+                vec3 g;
+                g.x = a0.x * x0.x + h.x * x0.y;
+                g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+                return 130.0 * dot(m, g);
+            }
+
+            void main() {
+                vec2 shape_uv = (gl_FragCoord.xy * 2.0 - uResolution.xy) / uResolution.y;
+                float l = max(length(shape_uv), 1e-4);
+                float t = uTime * uSpeed;
+                
+                float angle = ceil(uBandCount) * atan(shape_uv.y, shape_uv.x) + t;
+                float angle_norm = angle / TWO_PI;
+                
+                float twist = 3.0 * clamp(uTwist, 0.0, 1.0);
+                float offset = pow(l, -twist) + angle_norm;
+                float shape = fract(offset);
+                
+                shape = 1.0 - abs(2.0 * shape - 1.0);
+                shape += uNoise * snoise(15.0 * pow(uNoiseFrequency, 2.0) * shape_uv);
+                
+                float mid = smoothstep(0.2, 0.2 + 0.8 * uCenter, pow(l, twist));
+                shape = mix(0.0, shape, mid);
+                
+                float proportion = clamp(uProportion, 0.0, 1.0);
+                float exponent = mix(0.25, 1.0, proportion * 2.0);
+                exponent = mix(exponent, 10.0, max(0.0, proportion * 2.0 - 1.0));
+                shape = pow(shape, exponent);
+                
+                float colorCount = clamp(floor(uColorCount + 0.5), 1.0, 7.0);
+                float mixer = shape * colorCount;
+                
+                vec4 gradient = uColors[0];
+                gradient.rgb *= gradient.a;
+                float outerShape = 0.0;
+                
+                // Fallback anti-aliasing delta instead of fwidth
+                float aa = 0.02; 
+                
+                for (int i = 1; i < 7; i++) {
+                    if (float(i) >= colorCount) break;
+                    float m = clamp(mixer - float(i - 1), 0.0, 1.0);
+                    m = smoothstep( 0.5 - 0.5 * uSoftness - aa, 0.5 + 0.5 * uSoftness + aa, m );
+                    if (i == 1) {
+                        outerShape = m;
+                    }
+                    vec4 c = uColors[i];
+                    c.rgb *= c.a;
+                    gradient = mix(gradient, c, m);
+                }
+                
+                float midAA = 0.1 * (0.02 / max(pow(l, -twist), 0.001));
+                float outerMid = smoothstep(0.2, 0.2 + midAA, pow(l, twist));
+                outerShape = mix(0.0, outerShape, outerMid);
+                
+                vec3 baseColor = gradient.rgb * outerShape;
+                float opacity = gradient.a * outerShape;
+                
+                vec3 bgColor = uColorBack.rgb * uColorBack.a;
+                baseColor = baseColor + bgColor * (1.0 - opacity);
+                opacity = opacity + uColorBack.a * (1.0 - opacity);
+                
+                vec3 hsv = rgb2hsv(baseColor);
+                hsv.x += uHue / 360.0;
+                hsv.y *= uSaturation;
+                baseColor = hsv2rgb(hsv);
+                
+                gl_FragColor = vec4(baseColor, opacity);
+            }
+        `;
+
         // =========================================================================
         // LOCALIZATION
         // =========================================================================
@@ -669,7 +799,20 @@
                 luminousResin: "Luminous Resin",
                 dripStrength: "Drip Strength",
                 gooeyness: "Gooeyness",
-                resinColors: "Resin Colors"
+                resinColors: "Resin Colors",
+                swirl: "Swirl",
+                bandCount: "Band Count",
+                center: "Center",
+                proportion: "Proportion",
+                softness: "Softness",
+                noiseFrequency: "Noise Frequency",
+                swirlColors: "Swirl Colors",
+                colorCount: "Color Count",
+                thirdColor: "Third Color",
+                fourthColor: "Fourth Color",
+                fifthColor: "Fifth Color",
+                sixthColor: "Sixth Color",
+                seventhColor: "Seventh Color",
             },
             he: {
                 appName: "קרח Go",
@@ -703,7 +846,20 @@
                 luminousResin: "שרף זוהר",
                 dripStrength: "עוצמת טפטוף",
                 gooeyness: "צמיגיות",
-                resinColors: "צבעי שרף"
+                resinColors: "צבעי שרף",
+                swirl: "סחרור",
+                bandCount: "מספר פסי הצבע",
+                center: "מרכז",
+                proportion: "פרופורציה",
+                softness: "רכות",
+                noiseFrequency: "תדירות רעש",
+                swirlColors: "צבעי הסחרור",
+                colorCount: "מספר צבעים",
+                thirdColor: "צבע שלישי",
+                fourthColor: "צבע רביעי",
+                fifthColor: "צבע חמישי",
+                sixthColor: "צבע שישי",
+                seventhColor: "צבע שביעי",
             },
             it: {
                 appName: "Kerach Go",
@@ -737,7 +893,20 @@
                 luminousResin: "Resina Luminosa",
                 dripStrength: "Forza Gocciolamento",
                 gooeyness: "Viscosità",
-                resinColors: "Colori Resina"
+                resinColors: "Colori Resina",
+                swirl: "Vortice",
+                bandCount: "Numero di bande",
+                center: "Centro",
+                proportion: "Proporzione",
+                softness: "Morbidità",
+                noiseFrequency: "Frequenza del rumore",
+                swirlColors: "Colori del vortice",
+                colorCount: "Numero di colori",
+                thirdColor: "Terzo colore",
+                fourthColor: "Quarto colore",
+                fifthColor: "Quinto colore",
+                sixthColor: "Sesto colore",
+                seventhColor: "Settimo colore",
             },
             es: {
                 appName: "Kerach Go",
@@ -771,7 +940,20 @@
                 luminousResin: "Resina Luminosa",
                 dripStrength: "Fuerza de Goteo",
                 gooeyness: "Viscosidad",
-                resinColors: "Colores de Resina"
+                resinColors: "Colores de Resina",
+                swirl: "Remolino",
+                bandCount: "Cantidad de bandas",
+                center: "Centro",
+                proportion: "Proporción",
+                softness: "Suavidad",
+                noiseFrequency: "Frecuencia de ruido",
+                swirlColors: "Colores del remolino",
+                colorCount: "Cantidad de colores",
+                thirdColor: "Tercer color",
+                fourthColor: "Cuarto color",
+                fifthColor: "Quinto color",
+                sixthColor: "Sexto color",
+                seventhColor: "Séptimo color",
             },
             pt: {
                 appName: "Kerach Go",
@@ -805,7 +987,20 @@
                 luminousResin: "Resina Luminosa",
                 dripStrength: "Força de Gotejamento",
                 gooeyness: "Viscosidade",
-                resinColors: "Cores da Resina"
+                resinColors: "Cores da Resina",
+                swirl: "Redemoinho",
+                bandCount: "Quantidade de faixas",
+                center: "Centro",
+                proportion: "Proporção",
+                softness: "Suavidade",
+                noiseFrequency: "Frequência de ruído",
+                swirlColors: "Cores do redemoinho",
+                colorCount: "Quantidade de cores",
+                thirdColor: "Terceira cor",
+                fourthColor: "Quarta cor",
+                fifthColor: "Quinta cor",
+                sixthColor: "Sexta cor",
+                seventhColor: "Sétima cor",
             },
             ja: {
                 appName: "Kerach Go", controls: "コントロール", shader: "シェーダー", palette: "パレット", mix: "ミックス",
@@ -837,7 +1032,20 @@
                 luminousResin: "ルミナスレジン",
                 dripStrength: "ドリップの強さ",
                 gooeyness: "ねばねば感",
-                resinColors: "レジンの色"
+                resinColors: "レジンの色",
+                swirl: "渦巻き",
+                bandCount: "バンド数",
+                center: "中心",
+                proportion: "比率",
+                softness: "柔らかさ",
+                noiseFrequency: "ノイズ周波数",
+                swirlColors: "渦巻きの色",
+                colorCount: "色数",
+                thirdColor: "3番目の色",
+                fourthColor: "4番目の色",
+                fifthColor: "5番目の色",
+                sixthColor: "6番目の色",
+                seventhColor: "7番目の色",
             },
             yue: {
                 appName: "Kerach Go", controls: "控制", shader: "着色器", palette: "調色盤", mix: "混合",
@@ -867,7 +1075,20 @@
                 luminousResin: "發光樹脂",
                 dripStrength: "滴落強度",
                 gooeyness: "粘稠度",
-                resinColors: "樹脂顏色"
+                resinColors: "樹脂顏色",
+                swirl: "漩渦",
+                bandCount: "條紋數量",
+                center: "中心",
+                proportion: "比例",
+                softness: "柔和度",
+                noiseFrequency: "雜訊頻率",
+                swirlColors: "漩渦顏色",
+                colorCount: "顏色數量",
+                thirdColor: "第三種顏色",
+                fourthColor: "第四種顏色",
+                fifthColor: "第五種顏色",
+                sixthColor: "第六種顏色",
+                seventhColor: "第七種顏色",
             }
         };
 
@@ -1501,6 +1722,8 @@
 
 [radix-ui](https://www.npmjs.com/package/radix-ui)
 
+[Google Gemini](https://gemini.google.com/)
+
 [Input Floating Label animation](https://codepen.io/Mahe76/pen/qBQgXyK) by [Elpeeda](https://codepen.io/Mahe76)
 
 [GradientGen](https://github.com/noegarsoux/GradientGen) by [noegarsoux](https://github.com/noegarsoux)
@@ -1512,6 +1735,10 @@
 [Floating voronoi lines](https://codepen.io/lekzd/pen/xbwMMzR) by [Alexander Korotaev](https://codepen.io/lekzd)
 
 [Unnamed Luminous Material](https://x.com/gibkun1/status/2013734035454042547) by [タツキ｜サムネ顧問](https://x.com/gibkun1)
+
+[swirl](https://shaders.paper.design/swirl) by [Paper Shaders](https://shaders.paper.design/)
+
+[shaders](https://github.com/paper-design/shaders) by [paper design](https://github.com/paper-design)
         `;
 
         function CreditHighlightHover({ children, href, className }) {
@@ -1674,62 +1901,172 @@
             );
         };
 
-        function NamerUiBadge({ 
-            href = "https://namer-ui.vercel.app/", 
-            isRTL = false, 
-            isMobile = false, 
-            poweredByText = "Powered by", 
-            namerUIName = "Namer UI" 
+        function FooterBadge({
+            id = "", // "namer" or "paper"
+            href = "https://namer-ui.vercel.app/",
+            isRTL = false,
+            isMobile = false,
+            poweredByText = "Powered by",
+            badgeName = "Namer UI",
+            imageUrl = "namer-ui-logo.png",
+            imageBorder = false,
+            animateFlip = false,
         }) {
-            const [isHovered, setIsHovered] = React.useState(false);
-            return (
-                <a
+        const [isHovered, setIsHovered] = React.useState(false);
+
+        // Compute specific image background based on the badge ID
+        const getImageBg = () => {
+            if (id === "namer") {
+            return "linear-gradient(135deg, #4776cb, #a19fe5, #6cc606)";
+            }
+            return "#000000"; // Defaults to black for "paper"
+        };
+
+        return (
+            <>
+            <a
                 href={href}
                 target="_blank"
                 rel="noopener noreferrer"
                 dir={isRTL ? "rtl" : "ltr"}
-                className="inline-flex flex-col rounded-squircle select-none"
+                className="badge-card inline-flex flex-col rounded-[12px] select-none"
                 style={{
-                    background: isHovered ? "#141414" : "#111",
-                    border: `1px solid ${isHovered ? "#303030" : "#242424"}`,
-                    padding: isMobile ? "8px 16px 16px 16px" : "16px 24px 24px 24px",
-                    userSelect: "none",
-                    maxWidth: "max-content",
-                    textAlign: isRTL ? "right" : "left",
-                    transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                background: isHovered ? "#141414" : "#111",
+                border: `1px solid ${isHovered ? "#303030" : "#242424"}`,
+                padding: isMobile ? "8px 16px 16px 16px" : "16px 24px 24px 24px",
+                maxWidth: "max-content",
+                textAlign: isRTL ? "right" : "left",
+                transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                textDecoration: "none",
+                cursor: "pointer",
                 }}
-                onClick={(e) => e.stopPropagation()}
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
-                >
+            >
+                {/* Subtext */}
                 <span
-                    className="text-[var(--sub-foreground)] text-[12px] mb-2"
-                    style={{ userSelect: "none" }}
+                className="text-[12px] mb-2 block"
+                style={{ color: "#A3A3A3", userSelect: "none" }}
                 >
-                    {poweredByText}
+                {poweredByText}
                 </span>
+
+                {/* Content Row */}
                 <div
-                    className="inline-flex items-center gap-3"
-                    style={{
+                className="inline-flex items-center gap-3"
+                style={{
                     justifyContent: isRTL ? "flex-end" : "flex-start",
+                }}
+                >
+                {/* Logo Frame wrapper */}
+                <span
+                    style={{
+                    width: "32px",
+                    height: "32px",
+                    minWidth: "32px",
+                    minHeight: "32px",
+                    borderRadius: "8px",
+                    overflow: "hidden",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: getImageBg(),
+                    flexShrink: 0,
+                    boxSizing: "border-box",
+                    border: imageBorder
+                        ? `1px solid ${isHovered ? "#303030" : "#242424"}`
+                        : "none",
                     }}
                 >
                     <img
-                    src="namer-ui-logo.png"
-                    alt={namerUIName}
+                    src={imageUrl}
+                    alt={badgeName}
                     width={32}
                     height={32}
-                    style={{ objectFit: "contain", display: "inline-block" }}
+                    draggable={false}
+                    style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "contain",
+                        display: "block",
+                    }}
                     />
-                    <span
-                    className="font-bold text-base text-[var(--foreground)] select-none"
-                    dir={isRTL ? "rtl" : "ltr"}
-                    >
-                    {namerUIName}
+                </span>
+
+                {/* Flip Animation Wrapper match exact from first component */}
+                {animateFlip ? (
+                    <span className="flip-wrapper">
+                    <span>
+                        <em className="flip-text">
+                        <span className="font-bold text-base text-[#F5F5F5] select-none whitespace-nowrap block">
+                            {badgeName}
+                        </span>
+                        </em>
                     </span>
+                    <span>
+                        <em className="flip-text">
+                        <span className="font-bold text-base text-[#F5F5F5] select-none whitespace-nowrap block">
+                            {badgeName}
+                        </span>
+                        </em>
+                    </span>
+                    </span>
+                ) : (
+                    <span className="font-bold text-base text-[#F5F5F5] select-none whitespace-nowrap block">
+                    {badgeName}
+                    </span>
+                )}
                 </div>
-                </a>
-            );
+            </a>
+
+            {/* Scoped Styling for Perfect GPU-Accelerated 3D Flip */}
+            <style jsx>{`
+                .flip-wrapper {
+                position: relative;
+                display: block;
+                perspective: 108px;
+                }
+                .flip-wrapper span {
+                display: block;
+                }
+                .flip-wrapper span:nth-of-type(2) {
+                position: absolute;
+                top: 0;
+                left: 0;
+                }
+                .flip-text {
+                font-style: normal;
+                display: inline-block;
+                font-size: inherit;
+                font-weight: inherit;
+                line-height: inherit;
+                will-change: transform, opacity;
+                transition: transform 0.55s cubic-bezier(0.645, 0.045, 0.355, 1),
+                    opacity 0.35s linear 0.2s;
+                }
+                .flip-wrapper span:nth-of-type(1) .flip-text {
+                transform-origin: top;
+                opacity: 1;
+                transform: rotateX(0deg);
+                }
+                .flip-wrapper span:nth-of-type(2) .flip-text {
+                opacity: 0;
+                transform: rotateX(-90deg) scaleX(0.9) translate3d(0, 10px, 0);
+                transform-origin: bottom;
+                }
+                .badge-card:hover .flip-wrapper span:nth-of-type(1) .flip-text {
+                opacity: 0;
+                transform: rotateX(90deg) scaleX(0.9) translate3d(0, -10px, 0);
+                }
+                .badge-card:hover .flip-wrapper span:nth-of-type(2) .flip-text {
+                opacity: 1;
+                transform: rotateX(0deg) scaleX(1) translateZ(0);
+                transition: transform 0.75s cubic-bezier(0.645, 0.045, 0.355, 1),
+                    opacity 0.35s linear 0.3s;
+                }
+            `}</style>
+            </>
+        );
         };
 
         // =========================================================================
@@ -1886,6 +2223,33 @@
                         uColor1: { value: new THREE.Vector3(0.0, 0.8, 1.0) },
                         uColor2: { value: new THREE.Vector3(0.5, 0.0, 1.0) },
                         uColor3: { value: new THREE.Vector3(1.0, 0.0, 0.5) },
+                    });
+                } else if (type === 'swirl') {
+                    baseFragment = swirlFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 1.0 },
+                        uBandCount: { value: 4.0 },
+                        uTwist: { value: 0.25 },
+                        uCenter: { value: 1.0 },
+                        uProportion: { value: 0.5 },
+                        uSoftness: { value: 0.1 },
+                        uNoise: { value: 0.3 },
+                        uNoiseFrequency: { value: 1.5 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                        uColorCount: { value: 4.0 },
+                        uColorBack: { value: new THREE.Vector4(0.165, 0.165, 0.165, 1.0) },
+                        uColors: {
+                            value: [
+                                new THREE.Vector4(0.165, 0.165, 0.165, 1.0), // #2a2a2a (0.165, 0.165, 0.165)
+                                new THREE.Vector4(0.075, 0.835, 0.698, 1.0), // #13d5b2 (0.075, 0.835, 0.698)
+                                new THREE.Vector4(0.698, 0.075, 0.835, 1.0), // #b213d5 (0.698, 0.075, 0.835)
+                                new THREE.Vector4(0.592, 0.835, 0.075, 1.0), // #97d513 (0.592, 0.835, 0.075)
+                                new THREE.Vector4(0.075, 0.835, 0.318, 1.0), // #13d551 (0.075, 0.835, 0.318)
+                                new THREE.Vector4(0.165, 0.165, 0.165, 1.0), // #2a2a2a (0.165, 0.165, 0.165)
+                                new THREE.Vector4(0.165, 0.165, 0.165, 1.0) // #2a2a2a (0.165, 0.165, 0.165)
+                            ]
+                        }
                     });
                 } else {
                     baseFragment = meltFragShader;
@@ -2058,6 +2422,30 @@
                             mat.uniforms.uColor1.value.set(...cur.luminousResin.color1);
                             mat.uniforms.uColor2.value.set(...cur.luminousResin.color2);
                             mat.uniforms.uColor3.value.set(...cur.luminousResin.color3);
+
+                        } else if (cur.activeShader === 'swirl') {
+                            mat.uniforms.uSpeed.value = cur.swirl.speed;
+                            mat.uniforms.uBandCount.value = cur.swirl.bandCount;
+                            mat.uniforms.uTwist.value = cur.swirl.twist;
+                            mat.uniforms.uCenter.value = cur.swirl.center;
+                            mat.uniforms.uProportion.value = cur.swirl.proportion;
+                            mat.uniforms.uSoftness.value = cur.swirl.softness;
+                            mat.uniforms.uNoise.value = cur.swirl.noise;
+                            mat.uniforms.uNoiseFrequency.value = cur.swirl.noiseFrequency;
+                            mat.uniforms.uHue.value = cur.swirl.hue;
+                            mat.uniforms.uSaturation.value = cur.swirl.saturation;
+                            mat.uniforms.uColorCount.value = cur.swirl.colorCount;
+                            
+                            // Map background vec4 [r, g, b, a]
+                            mat.uniforms.uColorBack.value.set(...cur.swirl.colorBack);
+                            
+                            // Map all 7 color cards cleanly into the array matching indices
+                            for (let i = 0; i < 7; i++) {
+                                const cardKey = `color${i + 1}`;
+                                if (cur.swirl[cardKey]) {
+                                    mat.uniforms.uColors.value[i].set(...cur.swirl[cardKey]);
+                                }
+                            }
                         }
                     }
 
@@ -2116,6 +2504,27 @@
                     color1: [0.0, 0.584, 1.0],
                     color2: [0.086, 0.773, 0.306],
                     color3: [0.961, 0.286, 0.020]
+                },
+                swirl: {
+                    speed: 1.0,
+                    bandCount: 4.0,
+                    twist: 0.09,
+                    center: 1.0,
+                    proportion: 0.5,
+                    softness: 0.1,
+                    noise: 0.3,
+                    noiseFrequency: 0,
+                    hue: 0,
+                    saturation: 1.0,
+                    colorCount: 5,
+                    colorBack: [0.165, 0.165, 0.165, 1.0],
+                    color1:    [0.165, 0.165, 0.165, 1.0],
+                    color2:    [0.075, 0.835, 0.698, 1.0],
+                    color3:    [0.698, 0.075, 0.835, 1.0],
+                    color4:    [0.592, 0.835, 0.075, 1.0],
+                    color5:    [0.075, 0.835, 0.318, 1.0],
+                    color6:    [0.165, 0.165, 0.165, 1.0],
+                    color7:    [0.165, 0.165, 0.165, 1.0]
                 },
                 blurStrength: 0.0,
                 isFrozen: false,
@@ -2319,7 +2728,7 @@
                         <div className="space-y-3 pt-4 border-t border-white/10">
                             <StaticSelect
                                 label={t('activeShader')}
-                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin'].map(v => ({
+                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl'].map(v => ({
                                     value: v,
                                     label: v === 'luminousResin' ? t('luminousResin') : t(v),
                                 }))}
@@ -2524,6 +2933,166 @@
                         )}
                         </div>
 
+                        {/* SWIRL SHADER CONTROLS */}
+                        {settings.activeShader === 'swirl' && (
+                            <>
+                                <ShaderSlider 
+                                    label={t('speed')} 
+                                    value={settings.swirl.speed} 
+                                    min={0} 
+                                    max={5} 
+                                    step={0.1}
+                                    update={v => updateNested('swirl', 'speed', v)} 
+                                    dir={dir} 
+                                />
+                                <ShaderSlider 
+                                    label={t('bandCount')} 
+                                    value={settings.swirl.bandCount} 
+                                    min={1} 
+                                    max={20} 
+                                    step={1}
+                                    update={v => updateNested('swirl', 'bandCount', v)} 
+                                    dir={dir} 
+                                />
+                                <ShaderSlider 
+                                    label={t('twist')} 
+                                    value={settings.swirl.twist} 
+                                    min={0} 
+                                    max={1} 
+                                    step={0.01}
+                                    update={v => updateNested('swirl', 'twist', v)} 
+                                    dir={dir} 
+                                />
+                                <ShaderSlider 
+                                    label={t('center')} 
+                                    value={settings.swirl.center} 
+                                    min={0} 
+                                    max={2} 
+                                    step={0.05}
+                                    update={v => updateNested('swirl', 'center', v)} 
+                                    dir={dir} 
+                                />
+                                <ShaderSlider 
+                                    label={t('proportion')} 
+                                    value={settings.swirl.proportion} 
+                                    min={0} 
+                                    max={1} 
+                                    step={0.01}
+                                    update={v => updateNested('swirl', 'proportion', v)} 
+                                    dir={dir} 
+                                />
+                                <ShaderSlider 
+                                    label={t('softness')} 
+                                    value={settings.swirl.softness} 
+                                    min={0} 
+                                    max={1} 
+                                    step={0.01}
+                                    update={v => updateNested('swirl', 'softness', v)} 
+                                    dir={dir} 
+                                />
+                                <ShaderSlider 
+                                    label={t('noiseStrength')} 
+                                    value={settings.swirl.noise} 
+                                    min={0} 
+                                    max={2} 
+                                    step={0.05}
+                                    update={v => updateNested('swirl', 'noise', v)} 
+                                    dir={dir} 
+                                />
+                                <ShaderSlider 
+                                    label={t('noiseFrequency')} 
+                                    value={settings.swirl.noiseFrequency} 
+                                    min={0} 
+                                    max={5} 
+                                    step={0.1}
+                                    update={v => updateNested('swirl', 'noiseFrequency', v)} 
+                                    dir={dir} 
+                                />
+                                <ShaderSlider 
+                                    label={t('hue')} 
+                                    value={settings.swirl.hue} 
+                                    min={0} 
+                                    max={360} 
+                                    step={1}
+                                    update={v => updateNested('swirl', 'hue', v)} 
+                                    dir={dir} 
+                                />
+                                <ShaderSlider 
+                                    label={t('saturation')} 
+                                    value={settings.swirl.saturation} 
+                                    min={0} 
+                                    max={2} 
+                                    step={0.05}
+                                    update={v => updateNested('swirl', 'saturation', v)} 
+                                    dir={dir} 
+                                />
+
+                                {/* COLOR COUNT SLIDER (Adjusts number of colors from 1 to 7) */}
+                                <ShaderSlider 
+                                    label={t('colorCount')} 
+                                    value={settings.swirl.colorCount} 
+                                    min={2} 
+                                    max={7} 
+                                    step={1}
+                                    update={v => updateNested('swirl', 'colorCount', v)} 
+                                    dir={dir} 
+                                />
+
+                                {/* SWIRL COLOR CARDS - STACKED VERTICALLY */}
+                                <div className="mt-4 space-y-4">
+                                    <span className="text-xs uppercase text-gray-500 block">
+                                        {t('swirlColors')}
+                                    </span>
+                                    <div className="flex flex-col space-y-3">
+                                        {[
+                                        'firstColor',
+                                        'secondColor',
+                                        'thirdColor',
+                                        'fourthColor',
+                                        'fifthColor',
+                                        'sixthColor',
+                                        'seventhColor',
+                                        ].map((translationKey, i) => {
+                                        if (i >= settings.swirl.colorCount) return null;
+
+                                        const cardLabel = t(translationKey);
+
+                                        return (
+                                            <div key={translationKey} className="w-full space-y-1 p-2 bg-white/5 rounded">
+                                            <span className="text-[10px] uppercase text-gray-400 block">{cardLabel}</span>
+                                            <ColorPicker
+                                                color={rgbArrayToHex(settings.swirl[`color${i + 1}`].slice(0, 3))}
+                                                onChange={h => {
+                                                const rgb = hexToRgbArray(h);
+                                                const rgba = [
+                                                    rgb[0],
+                                                    rgb[1],
+                                                    rgb[2],
+                                                    settings.swirl[`color${i + 1}`][3] ?? 1.0,
+                                                ];
+
+                                                if (i === 0) {
+                                                    setSettings(p => ({
+                                                    ...p,
+                                                    swirl: {
+                                                        ...p.swirl,
+                                                        color1: rgba,
+                                                        colorBack: rgba,
+                                                    },
+                                                    }));
+                                                } else {
+                                                    updateNested('swirl', `color${i + 1}`, rgba);
+                                                }
+                                                }}
+                                            />
+                                            </div>
+                                        );
+                                        })}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
                         {/* Effects */}
                         <div className="space-y-3 pt-4 border-t border-white/10">
                             <div>
@@ -2570,11 +3139,28 @@
                         </div>
 
                         <div className="flex flex-col items-center space-y-6">
-                        <NamerUiBadge
-                            poweredByText={t('poweredBy')}
-                            namerUIName={dir === 'rtl' ? 'נמר UI' : 'Namer UI'}
-                            isRTL={dir === 'rtl'}
-                        />
+                            {/* Badge 1: Namer UI */}
+                            <FooterBadge
+                                id="namer"
+                                href="https://namer-ui.vercel.app/" // Specific link for Namer UI
+                                imageUrl="Namer.png" // Specific logo
+                                badgeName={dir === 'rtl' ? 'נמר UI' : 'Namer UI'}
+                                poweredByText={t('poweredBy')}
+                                isRTL={dir === 'rtl'}
+                                animateFlip={true} // Optional: enables that cool flip animation on hover
+                            />
+
+                            {/* Badge 2: Paper Shaders */}
+                            <FooterBadge
+                                id="paper"
+                                href="https://shaders.paper.design/" // Specific link for Paper Shaders
+                                imageUrl="paper-logo.webp" // Specific logo
+                                imageBorder={true} // Optional: adds a nice subtle border around the logo
+                                badgeName={dir === 'rtl' ? 'פייפר שיידרס' : 'Paper Shaders'}
+                                poweredByText={t('poweredBy')}
+                                isRTL={dir === 'rtl'}
+                                animateFlip={true} 
+                            />
                         </div>
                         <div className="flex flex-col items-center space-y-6">
                             <a
