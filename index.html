@@ -760,6 +760,141 @@
             }
         `;
 
+        const spiralTunnelFragShader = `precision highp float;
+
+        uniform float uTime;
+        uniform vec2 uResolution;
+
+        uniform float uFieldOfView;
+        uniform float uLuminosity;
+        uniform float uOpeningSize;
+        uniform float uRibbonCount;
+        uniform float uRibbonWidth;
+        uniform float uSpiralDensity;
+        uniform float uSpiralCount;
+        uniform float uLightIntensity;
+        uniform float uDistortion;
+        uniform vec4 uColors[4];
+        uniform float uHue;
+        uniform float uSaturation;
+
+        ${hueSatHelpers}
+
+        const float TWO_PI = 6.28318530718;
+
+        void main() {
+            // Wrap time safely within a period of 100 * TWO_PI to maintain perfect highp floating point precision
+            float maxPeriod = TWO_PI * 100.0;
+            float t = mod(uTime, maxPeriod);
+
+            vec2 uv = (gl_FragCoord.xy * 2.0 - uResolution.xy) / uResolution.y;
+            float fovFactor = tan(radians(uFieldOfView * 0.5));
+            uv *= fovFactor;
+
+            float r = length(uv);
+
+            // Animate the rotation cleanly using the wrapped time variable
+            float angle = atan(uv.y, uv.x) - t * 0.05;
+
+            float openingMask = smoothstep(uOpeningSize * 0.002, uOpeningSize * 0.005, r);
+            if (openingMask <= 0.0) {
+                gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                return;
+            }
+
+            // Wrap the temporal factor of depth separately so it never compounds into massive values
+            float timeDepthOffset = mod(t * 0.1, maxPeriod);
+            float depth = 1.0 / max(r, 0.001) + timeDepthOffset;
+            vec3 outColor = vec3(0.0);
+            float ribbons = uRibbonCount;
+
+            for (int i = 0; i < 4; i++) {
+                if (float(i) >= uSpiralCount) break;
+
+                float offset = float(i) * (TWO_PI / max(uSpiralCount, 1.0));
+                float stripPattern = sin(angle * ribbons + depth * uSpiralDensity + offset) * cos(depth * uDistortion + float(i));
+                float edgeWidth = uRibbonWidth * 2.0;
+                vec3 segmentColor = uColors[i].rgb * smoothstep(0.5 - edgeWidth, 0.5 + edgeWidth, stripPattern);
+                outColor += segmentColor;
+            }
+
+            float denom = r * (19.0 - uLuminosity) * 0.1;
+            denom = max(denom, 0.001);
+            outColor *= uLightIntensity * (1.0 / denom) * openingMask;
+
+            float brightness = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
+            if (brightness > 0.3) {
+                outColor += outColor * 0.345;
+            }
+
+            vec3 hsv = rgb2hsv(outColor);
+            hsv.x += uHue / 360.0;
+            hsv.y *= uSaturation;
+            outColor = hsv2rgb(hsv);
+
+            gl_FragColor = vec4(outColor, 1.0);
+        }
+        `;
+
+        // Presets: clicking one fills in all the slider values below (including speed & color),
+        // but the sliders stay fully live afterwards - nothing gets locked or switched off.
+        const spiralTunnelPresets = [
+            {
+                name: 'Default',
+                values: {
+                    speed: 1, fieldOfView: 144, luminosity: 10, openingSize: 100, ribbonCount: 1,
+                    ribbonWidth: 0.1, spiralDensity: 5.6, spiralCount: 4, lightIntensity: 1.36, distortion: 11.04,
+                    hue: 0, saturation: 1,
+                    color1: '#00a2fa', color2: '#a020f0', color3: '#f97316', color4: '#22c55e',
+                },
+            },
+            {
+                name: 'Fan',
+                values: {
+                    speed: 20, fieldOfView: 144, luminosity: 15, openingSize: 100, ribbonCount: 6,
+                    ribbonWidth: 0.1, spiralDensity: 5.6, spiralCount: 4, lightIntensity: 1.36, distortion: 3,
+                    hue: 0, saturation: 1,
+                    color1: '#00a2fa', color2: '#a020f0', color3: '#f97316', color4: '#22c55e',
+                },
+            },
+            {
+                name: 'Tiles',
+                values: {
+                    speed: 5, fieldOfView: 132, luminosity: 10, openingSize: 100, ribbonCount: 7,
+                    ribbonWidth: 0, spiralDensity: 0, spiralCount: 4, lightIntensity: 1.36, distortion: 32,
+                    hue: 0, saturation: 1,
+                    color1: '#0ccddf', color2: '#8c00ff', color3: '#ff009d', color4: '#77e70d',
+                },
+            },
+            {
+                name: 'Chessboard',
+                values: {
+                    speed: 3.6, fieldOfView: 510, luminosity: 20, openingSize: 15, ribbonCount: 10,
+                    ribbonWidth: 0.3, spiralDensity: 12, spiralCount: 1, lightIntensity: 1.36, distortion: 32,
+                    hue: 0, saturation: 1,
+                    color1: '#ffffff', color2: '#a020f0', color3: '#f97316', color4: '#22c55e',
+                },
+            },
+            {
+                name: 'Wonderland',
+                values: {
+                    speed: 10, fieldOfView: 120, luminosity: 12, openingSize: 60, ribbonCount: 3,
+                    ribbonWidth: 0.39, spiralDensity: 3.6, spiralCount: 2, lightIntensity: 1.36, distortion: 7.6,
+                    hue: 0, saturation: 1,
+                    color1: '#ff0000', color2: '#ffffff', color3: '#000000', color4: '#000000',
+                },
+            },
+            {
+                name: 'Singularity',
+                values: {
+                    speed: 2, fieldOfView: 144, luminosity: 10, openingSize: 60, ribbonCount: 24,
+                    ribbonWidth: 0.3, spiralDensity: 5.6, spiralCount: 8, lightIntensity: 1.21, distortion: 20,
+                    hue: 0, saturation: 1,
+                    color1: '#00a2fa', color2: '#a020f0', color3: '#f97316', color4: '#22c55e',
+                },
+            },
+        ];
+
         // =========================================================================
         // LOCALIZATION
         // =========================================================================
@@ -813,6 +948,10 @@
                 fifthColor: "Fifth Color",
                 sixthColor: "Sixth Color",
                 seventhColor: "Seventh Color",
+                spiralTunnel: "Spiral Tunnel", presets: "Presets",
+                fieldOfView: "Field of View", luminosity: "Luminosity", openingSize: "Opening Size",
+                ribbonCount: "Ribbon Count", ribbonWidth: "Ribbon Width", spiralDensity: "Spiral Density",
+                spiralCount: "Spiral Count", lightIntensity: "Light Intensity", distortion: "Distortion",
             },
             he: {
                 appName: "קרח Go",
@@ -860,6 +999,10 @@
                 fifthColor: "צבע חמישי",
                 sixthColor: "צבע שישי",
                 seventhColor: "צבע שביעי",
+                spiralTunnel: "מנהרת ספירלה", presets: "פריסטים",
+                fieldOfView: "שדה ראייה", luminosity: "בהירות אור", openingSize: "גודל פתח",
+                ribbonCount: "מספר סרטים", ribbonWidth: "רוחב סרט", spiralDensity: "צפיפות ספירלה",
+                spiralCount: "מספר ספירלות", lightIntensity: "עוצמת אור", distortion: "עיוות",
             },
             it: {
                 appName: "Kerach Go",
@@ -907,6 +1050,10 @@
                 fifthColor: "Quinto colore",
                 sixthColor: "Sesto colore",
                 seventhColor: "Settimo colore",
+                spiralTunnel: "Tunnel a Spirale", presets: "Preimpostazioni",
+                fieldOfView: "Campo Visivo", luminosity: "Luminosità", openingSize: "Dimensione Apertura",
+                ribbonCount: "Numero Nastri", ribbonWidth: "Larghezza Nastro", spiralDensity: "Densità Spirale",
+                spiralCount: "Numero Spirali", lightIntensity: "Intensità Luce", distortion: "Distorsione",
             },
             es: {
                 appName: "Kerach Go",
@@ -954,6 +1101,10 @@
                 fifthColor: "Quinto color",
                 sixthColor: "Sexto color",
                 seventhColor: "Séptimo color",
+                spiralTunnel: "Túnel Espiral", presets: "Preajustes",
+                fieldOfView: "Campo de Visión", luminosity: "Luminosidad", openingSize: "Tamaño de Apertura",
+                ribbonCount: "Número de Cintas", ribbonWidth: "Ancho de Cinta", spiralDensity: "Densidad Espiral",
+                spiralCount: "Número de Espirales", lightIntensity: "Intensidad de Luz", distortion: "Distorsión",
             },
             pt: {
                 appName: "Kerach Go",
@@ -1001,6 +1152,10 @@
                 fifthColor: "Quinta cor",
                 sixthColor: "Sexta cor",
                 seventhColor: "Sétima cor",
+                spiralTunnel: "Túnel Espiral", presets: "Predefinições",
+                fieldOfView: "Campo de Visão", luminosity: "Luminosidade", openingSize: "Tamanho da Abertura",
+                ribbonCount: "Número de Fitas", ribbonWidth: "Largura da Fita", spiralDensity: "Densidade Espiral",
+                spiralCount: "Número de Espirais", lightIntensity: "Intensidade da Luz", distortion: "Distorção",
             },
             ja: {
                 appName: "Kerach Go", controls: "コントロール", shader: "シェーダー", palette: "パレット", mix: "ミックス",
@@ -1046,6 +1201,10 @@
                 fifthColor: "5番目の色",
                 sixthColor: "6番目の色",
                 seventhColor: "7番目の色",
+                spiralTunnel: "スパイラルトンネル", presets: "プリセット",
+                fieldOfView: "視野角", luminosity: "輝度", openingSize: "開口サイズ",
+                ribbonCount: "リボン数", ribbonWidth: "リボン幅", spiralDensity: "スパイラル密度",
+                spiralCount: "スパイラル数", lightIntensity: "光の強さ", distortion: "歪み",
             },
             yue: {
                 appName: "Kerach Go", controls: "控制", shader: "着色器", palette: "調色盤", mix: "混合",
@@ -1089,6 +1248,10 @@
                 fifthColor: "第五種顏色",
                 sixthColor: "第六種顏色",
                 seventhColor: "第七種顏色",
+                spiralTunnel: "螺旋隧道", presets: "預設",
+                fieldOfView: "視野", luminosity: "亮度", openingSize: "開口大小",
+                ribbonCount: "緞帶數量", ribbonWidth: "緞帶寬度", spiralDensity: "螺旋密度",
+                spiralCount: "螺旋數量", lightIntensity: "光照強度", distortion: "扭曲",
             }
         };
 
@@ -1728,6 +1891,8 @@
 
 [GradientGen](https://github.com/noegarsoux/GradientGen) by [noegarsoux](https://github.com/noegarsoux)
 
+[Velustro](https://uvcanvas.com/docs/components/velustro) by [UVCanvas](https://uvcanvas.com/)
+
 [Balatro Background Shaders](https://www.shadertoy.com/view/XXtBRr) by [xxidbr9](https://www.shadertoy.com/user/xxidbr9)
 
 [Non liquid glass](https://codepen.io/lekzd/pen/dPGYjdj) by [Alexander Korotaev](https://codepen.io/lekzd)
@@ -1736,7 +1901,13 @@
 
 [Unnamed Luminous Material](https://x.com/gibkun1/status/2013734035454042547) by [タツキ｜サムネ顧問](https://x.com/gibkun1)
 
+[Tranquiluxe](https://uvcanvas.com/docs/components/tranquiluxe) by [UVCanvas](https://uvcanvas.com/)
+
 [swirl](https://shaders.paper.design/swirl) by [Paper Shaders](https://shaders.paper.design/)
+
+[Highway to Heaven](https://codepen.io/sabosugi/pen/azpqWKE) by [Sabo Sugi](https://codepen.io/sabosugi)
+
+[Hall of Fractals](https://codepen.io/sabosugi/pen/gbgeXja) by [Sabo Sugi](https://codepen.io/sabosugi)
 
 [shaders](https://github.com/paper-design/shaders) by [paper design](https://github.com/paper-design)
         `;
@@ -2251,6 +2422,29 @@
                             ]
                         }
                     });
+                } else if (type === 'spiralTunnel') {
+                    baseFragment = spiralTunnelFragShader;
+                    Object.assign(uniforms, {
+                        uFieldOfView: { value: 144 },
+                        uLuminosity: { value: 10 },
+                        uOpeningSize: { value: 100 },
+                        uRibbonCount: { value: 1 },
+                        uRibbonWidth: { value: 0.1 },
+                        uSpiralDensity: { value: 5.6 },
+                        uSpiralCount: { value: 4 },
+                        uLightIntensity: { value: 1.36 },
+                        uDistortion: { value: 11.04 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                        uColors: {
+                            value: [
+                                new THREE.Vector4(0.0, 0.635, 0.980, 1.0),
+                                new THREE.Vector4(0.627, 0.125, 0.941, 1.0),
+                                new THREE.Vector4(0.976, 0.451, 0.086, 1.0),
+                                new THREE.Vector4(0.133, 0.773, 0.369, 1.0),
+                            ]
+                        }
+                    });
                 } else {
                     baseFragment = meltFragShader;
                     Object.assign(uniforms, {
@@ -2446,6 +2640,30 @@
                                     mat.uniforms.uColors.value[i].set(...cur.swirl[cardKey]);
                                 }
                             }
+                        } else if (cur.activeShader === 'spiralTunnel') {
+                            // Explicit time = elapsed * ownSpeed so both the Speed slider
+                            // and the Freeze/manual-time override behave correctly.
+                            mat.uniforms.uTime.value = elapsed * cur.spiralTunnel.speed;
+                            mat.uniforms.uFieldOfView.value = cur.spiralTunnel.fieldOfView;
+                            mat.uniforms.uLuminosity.value = cur.spiralTunnel.luminosity;
+                            mat.uniforms.uOpeningSize.value = cur.spiralTunnel.openingSize;
+                            mat.uniforms.uRibbonCount.value = cur.spiralTunnel.ribbonCount;
+                            mat.uniforms.uRibbonWidth.value = cur.spiralTunnel.ribbonWidth;
+                            mat.uniforms.uSpiralDensity.value = cur.spiralTunnel.spiralDensity;
+                            mat.uniforms.uSpiralCount.value = cur.spiralTunnel.spiralCount;
+                            mat.uniforms.uLightIntensity.value = cur.spiralTunnel.lightIntensity;
+                            mat.uniforms.uDistortion.value = cur.spiralTunnel.distortion;
+                            mat.uniforms.uHue.value = cur.spiralTunnel.hue;
+                            mat.uniforms.uSaturation.value = cur.spiralTunnel.saturation;
+
+                            // Map the 4 color cards into the uColors array
+                            for (let i = 0; i < 4; i++) {
+                                const cardKey = `color${i + 1}`;
+                                if (cur.spiralTunnel[cardKey]) {
+                                    const [cr, cg, cb] = cur.spiralTunnel[cardKey];
+                                    mat.uniforms.uColors.value[i].set(cr, cg, cb, 1.0);
+                                }
+                            }
                         }
                     }
 
@@ -2526,6 +2744,24 @@
                     color6:    [0.165, 0.165, 0.165, 1.0],
                     color7:    [0.165, 0.165, 0.165, 1.0]
                 },
+                spiralTunnel: {
+                    speed: 1,
+                    fieldOfView: 144,
+                    luminosity: 10,
+                    openingSize: 100,
+                    ribbonCount: 1,
+                    ribbonWidth: 0.1,
+                    spiralDensity: 5.6,
+                    spiralCount: 4,
+                    lightIntensity: 1.36,
+                    distortion: 11.04,
+                    hue: 0,
+                    saturation: 1,
+                    color1: [0.0, 0.635, 0.980],
+                    color2: [0.627, 0.125, 0.941],
+                    color3: [0.976, 0.451, 0.086],
+                    color4: [0.133, 0.773, 0.369],
+                },
                 blurStrength: 0.0,
                 isFrozen: false,
                 manualTime: 0,
@@ -2575,6 +2811,23 @@
             // Utils
             const updateNested = (cat, key, val) => setSettings(p => ({ ...p, [cat]: { ...p[cat], [key]: val } }));
             const handleSlider = (key, val) => setSettings(p => ({ ...p, [key]: val }));
+
+            // Applies a Spiral Tunnel preset: fills in every slider (incl. speed & colors).
+            // This is a one-time "stamp" of values into state, not a locked mode -
+            // every slider stays fully editable afterwards.
+            const applySpiralTunnelPreset = (preset) => {
+                setSettings(p => ({
+                    ...p,
+                    spiralTunnel: {
+                        ...p.spiralTunnel,
+                        ...preset.values,
+                        color1: hexToRgbArray(preset.values.color1),
+                        color2: hexToRgbArray(preset.values.color2),
+                        color3: hexToRgbArray(preset.values.color3),
+                        color4: hexToRgbArray(preset.values.color4),
+                    },
+                }));
+            };
             
             // Config Handlers
             const [jsonInput, setJsonInput] = useState('');
@@ -2728,7 +2981,7 @@
                         <div className="space-y-3 pt-4 border-t border-white/10">
                             <StaticSelect
                                 label={t('activeShader')}
-                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl'].map(v => ({
+                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel'].map(v => ({
                                     value: v,
                                     label: v === 'luminousResin' ? t('luminousResin') : t(v),
                                 }))}
@@ -3088,6 +3341,152 @@
                                         );
                                         })}
                                     </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* SPIRAL TUNNEL SHADER */}
+                        {settings.activeShader === 'spiralTunnel' && (
+                            <>
+                                {/* PRESETS - buttons, not switches: clicking one fills in the
+                                    sliders below but never locks them; keep tweaking freely. */}
+                                <div className="space-y-2">
+                                    <span className="text-xs uppercase text-gray-500 font-bold tracking-widest block">
+                                        {t('presets')}
+                                    </span>
+                                    <div className="flex flex-wrap gap-2">
+                                        {spiralTunnelPresets.map((preset) => (
+                                            <button
+                                                key={preset.name}
+                                                type="button"
+                                                onClick={() => applySpiralTunnelPreset(preset)}
+                                                className="px-3 py-1.5 text-xs rounded-lg bg-white/5 border border-white/10 text-gray-300 hover:bg-accent hover:text-black hover:border-accent transition-colors"
+                                            >
+                                                {preset.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <ShaderSlider
+                                    label={t('speed')}
+                                    value={settings.spiralTunnel.speed}
+                                    min={0}
+                                    max={30}
+                                    step={0.1}
+                                    update={v => updateNested('spiralTunnel', 'speed', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('fieldOfView')}
+                                    value={settings.spiralTunnel.fieldOfView}
+                                    min={10}
+                                    max={600}
+                                    step={1}
+                                    update={v => updateNested('spiralTunnel', 'fieldOfView', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('luminosity')}
+                                    value={settings.spiralTunnel.luminosity}
+                                    min={1}
+                                    max={20}
+                                    step={0.1}
+                                    update={v => updateNested('spiralTunnel', 'luminosity', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('openingSize')}
+                                    value={settings.spiralTunnel.openingSize}
+                                    min={1}
+                                    max={100}
+                                    step={1}
+                                    update={v => updateNested('spiralTunnel', 'openingSize', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('ribbonCount')}
+                                    value={settings.spiralTunnel.ribbonCount}
+                                    min={0}
+                                    max={24}
+                                    step={1}
+                                    update={v => updateNested('spiralTunnel', 'ribbonCount', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('ribbonWidth')}
+                                    value={settings.spiralTunnel.ribbonWidth}
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    update={v => updateNested('spiralTunnel', 'ribbonWidth', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('spiralDensity')}
+                                    value={settings.spiralTunnel.spiralDensity}
+                                    min={0}
+                                    max={20}
+                                    step={0.1}
+                                    update={v => updateNested('spiralTunnel', 'spiralDensity', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('spiralCount')}
+                                    value={settings.spiralTunnel.spiralCount}
+                                    min={1}
+                                    max={8}
+                                    step={1}
+                                    update={v => updateNested('spiralTunnel', 'spiralCount', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('lightIntensity')}
+                                    value={settings.spiralTunnel.lightIntensity}
+                                    min={0}
+                                    max={3}
+                                    step={0.01}
+                                    update={v => updateNested('spiralTunnel', 'lightIntensity', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('distortion')}
+                                    value={settings.spiralTunnel.distortion}
+                                    min={0}
+                                    max={40}
+                                    step={0.1}
+                                    update={v => updateNested('spiralTunnel', 'distortion', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('hue')}
+                                    value={settings.spiralTunnel.hue}
+                                    min={0}
+                                    max={360}
+                                    step={1}
+                                    update={v => updateNested('spiralTunnel', 'hue', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('saturation')}
+                                    value={settings.spiralTunnel.saturation}
+                                    min={0}
+                                    max={2}
+                                    step={0.05}
+                                    update={v => updateNested('spiralTunnel', 'saturation', v)}
+                                    dir={dir}
+                                />
+
+                                <div className="flex flex-wrap gap-6 mt-4">
+                                    {['color1', 'color2', 'color3', 'color4'].map((col, i) => (
+                                        <div key={col} className="flex-1 min-w-[300px] space-y-2">
+                                            <span className="text-xs uppercase text-gray-500">Color {i + 1}</span>
+                                            <ColorPicker
+                                                color={rgbArrayToHex(settings.spiralTunnel[col])}
+                                                onChange={h => updateNested('spiralTunnel', col, hexToRgbArray(h))}
+                                            />
+                                        </div>
+                                    ))}
                                 </div>
                             </>
                         )}
