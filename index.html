@@ -895,6 +895,789 @@
             },
         ];
 
+        const kaleidoscopeFragShader = `precision highp float;
+        uniform float uTime;
+        uniform vec2 uResolution;
+        uniform float uSpeed;
+        uniform float uHue;
+        uniform float uSaturation;
+
+        ${hueSatHelpers}
+
+        vec3 palette( float t ) {
+            vec3 a = vec3(0.5, 0.5, 0.5);
+            vec3 b = vec3(0.5, 0.5, 0.5);
+            vec3 c = vec3(1.0, 1.0, 1.0);
+            vec3 d = vec3(0.263,0.416,0.557);
+            return a + b*cos( 6.283185*(c*t+d) );
+        }
+
+        void main() {
+            vec2 uv = (gl_FragCoord.xy * 2.0 - uResolution.xy) / uResolution.y;
+            vec2 uv0 = uv;
+            vec3 finalColor = vec3(0.0);
+
+            for (float i = 0.0; i < 4.0; i++) {
+                uv = fract(uv * 1.5) - 0.5;
+                float d = length(uv) * exp(-length(uv0));
+                vec3 col = palette(length(uv0) + i*.4 + uTime*uSpeed*.4);
+                d = sin(d*8. + uTime*uSpeed)/8.;
+                d = abs(d);
+                d = pow(0.01 / d, 1.2);
+                finalColor += col * d;
+            }
+
+            vec3 hsv = rgb2hsv(finalColor);
+            hsv.x += uHue / 360.0;
+            hsv.y *= uSaturation;
+            finalColor = hsv2rgb(hsv);
+
+            gl_FragColor = vec4(finalColor, 1.0);
+        }
+        `;
+
+        const fateFragShader = `precision highp float;
+        uniform float uTime;
+        uniform vec2 uResolution;
+        uniform float uSpeed;
+        uniform float uHue;
+        uniform float uSaturation;
+        #define TAU 6.283185
+        #define s1(v) (sin(v)*.5+.5)
+        ${hueSatHelpers}
+        vec3 palette( in float t ){
+          vec3 a = vec3(0.5, 0.5, 0.5);
+          vec3 b = vec3(0.5, 0.5, 0.5);
+          vec3 c = vec3(2.0, 1.0, 0.0);
+          vec3 d = vec3(0.5, 0.2, 0.25);
+          return a + b*cos( 6.283185*(c*t+d) );
+        }
+        float hash13(vec3 p3){
+        	p3  = fract(p3 * .1031);
+            p3 += dot(p3, p3.zyx + 31.32);
+            return fract((p3.x + p3.y) * p3.z);
+        }
+        vec3 randomGradient(vec3 p){
+          float the = hash13(p)*TAU;
+          float phi = hash13(p+vec3(3,2,1))*TAU;
+          return vec3(sin(the)*cos(phi), sin(the)*sin(phi), cos(the));
+        }
+        float noise(vec3 p){
+          vec3 i = floor(p);
+          vec3 f = fract(p);
+          vec3 g000 = randomGradient(i+vec3(0,0,0)); vec3 g100 = randomGradient(i+vec3(1,0,0));
+          vec3 g010 = randomGradient(i+vec3(0,1,0)); vec3 g001 = randomGradient(i+vec3(0,0,1));
+          vec3 g011 = randomGradient(i+vec3(0,1,1)); vec3 g101 = randomGradient(i+vec3(1,0,1));
+          vec3 g110 = randomGradient(i+vec3(1,1,0)); vec3 g111 = randomGradient(i+vec3(1,1,1));
+          float v000 = dot(g000, f-vec3(0,0,0)); float v100 = dot(g100, f-vec3(1,0,0));
+          float v010 = dot(g010, f-vec3(0,1,0)); float v001 = dot(g001, f-vec3(0,0,1));
+          float v011 = dot(g011, f-vec3(0,1,1)); float v101 = dot(g101, f-vec3(1,0,1));
+          float v110 = dot(g110, f-vec3(1,1,0)); float v111 = dot(g111, f-vec3(1,1,1));
+          vec3 u = f*f*f*(f*(f*6.0 - 15.0) + 10.0);
+          return mix(mix(mix(v000, v100, u.x), mix(v010, v110, u.x),u.y), mix(mix(v001, v101, u.x), mix(v011, v111, u.x), u.y), u.z);
+        }
+        float fbm(vec3 p){
+          float amp = 1.; float fre = 1.; float n = 0.;
+          for(float i =0.;i<4.;i++){ n += noise(fre*p)*amp; amp *= .5; fre *= 2.; }
+          return n;
+        }
+        float fbmWrap(vec3 p){
+          vec3 q = vec3(fbm(p+vec3(13.24,42.74,44.32)), fbm(p+vec3(51.16,17.93,98.23)), fbm(p+vec3(43.46,85.43,64.91)));
+          return fbm(q);
+        }
+        void main(){
+          vec2 uv = (gl_FragCoord.xy-vec2(uResolution.x/2.,uResolution.y/2.))/uResolution.y;
+          uv = vec2(atan(uv.y,uv.x), length(uv));
+          vec3 O = vec3(0.);
+          float T = uTime * uSpeed;
+          float k = .8;
+          float d = fbmWrap( vec3( k*sin(uv.x), k*cos(uv.x), uv.y - T*1.2 ) );
+          d -= uv.y-.4;
+          d = 1.-d;
+          vec3 col = mix(vec3(1), s1(vec3(3,2,1)+d*4.+T), d);
+          d = pow(.5/d,2.);
+          O += d*col;
+          vec3 hsv = rgb2hsv(O);
+          hsv.x += uHue / 360.0;
+          hsv.y *= uSaturation;
+          O = hsv2rgb(hsv);
+          gl_FragColor = vec4(O, 1.0);
+        }
+        `;
+
+        const structuredNoiseFragShader = `precision highp float;
+        uniform float uTime;
+        uniform vec2 uResolution;
+        uniform float uSpeed;
+        uniform float uMirrors;
+        uniform float uNoiseStrength;
+        uniform float uDistortionStrength;
+        uniform bool u_useFilter;
+        uniform vec3 u_filterColor;
+
+        ${hueSatHelpers}
+
+        const float PI = 3.14159265359;
+
+        float snoise(vec2 v) {
+            return fract(sin(dot(v, vec2(12.9898, 78.233))) * 43758.5453123);
+        }
+
+        void main() {
+            vec2 p = (2.0 * gl_FragCoord.xy - uResolution.xy) / uResolution.y;
+            float angle = atan(p.y, p.x);
+            float radius = length(p);
+            float t = uTime * uSpeed;
+
+            float symmetricDistort = sin(angle * 6.0 + t) * 0.05 + cos(radius * 8.0 - t) * 0.05;
+            float newAngle = angle + symmetricDistort * uDistortionStrength * 10.0;
+            p = vec2(cos(newAngle), sin(newAngle)) * radius;
+
+            radius = length(p);
+            angle = atan(p.y, p.x);
+            float normalizedAngle = 0.0;
+            float mirrorStrength = 1.0;
+
+            if (uMirrors >= 1.0) {
+                float sectorAngle = 2.0 * PI / uMirrors;
+                float wrappedAngle = mod(angle, 2.0 * PI);
+                float rawAngle = mod(wrappedAngle, sectorAngle);
+                float mirroredAngle = rawAngle > sectorAngle * 0.5 ? sectorAngle - rawAngle : rawAngle;
+                normalizedAngle = mirroredAngle / (sectorAngle * 0.5 + 1e-5);
+                p = radius * vec2(cos(mirroredAngle), sin(mirroredAngle));
+                float angleMask = pow(abs(cos(normalizedAngle * PI)), 3.0);
+                mirrorStrength = mix(0.5, 2.5, angleMask);
+            } else {
+                normalizedAngle = mod(angle, 2.0 * PI) / (2.0 * PI);
+            }
+
+            radius = length(p);
+            vec2 uv = vec2(0.0, radius);
+            uv = (2.0 * uv) - 1.0;
+
+            float noiseVal = snoise(p + t * 0.1) * uNoiseStrength;
+            float beamWidth = abs(5.0 / (30.0 * uv.y)) + noiseVal;
+            beamWidth *= mirrorStrength;
+
+            vec3 color = vec3(beamWidth);
+
+            if (u_useFilter) {
+              color *= u_filterColor;
+            }
+
+            gl_FragColor = vec4(color, 1.0);
+        }
+        `;
+
+        const hydrogenFragShader = `precision highp float;
+
+        uniform vec2 uResolution;
+        uniform float uTime;
+        uniform float uN;
+        uniform float uL;
+        uniform float uM;
+        uniform float uZoom;
+        uniform float uContrast;
+        uniform float uGamma;
+        uniform float uHue;
+        uniform float uSaturation;
+        uniform vec3 uColor1;
+        uniform vec3 uColor2;
+
+        ${hueSatHelpers}
+
+        const float a0 = 1.0;
+
+        float laguerre(float p_float, float q_float, float x) {
+            int p = int(p_float);
+            if (p == 0) return 1.0;
+            if (p == 1) return 1.0 + q_float - x;
+            if (p == 2) return (x*x - 2.0*(q_float+2.0)*x + (q_float+1.0)*(q_float+2.0)) / 2.0;
+            if (p == 3) return (-x*x*x + 3.0*(q_float+3.0)*x*x - 3.0*(q_float+2.0)*(q_float+3.0)*x + (q_float+1.0)*(q_float+2.0)*(q_float+3.0)) / 6.0;
+
+            return 1.0 - x / (q_float + 1.0);
+        }
+
+        float legendre(float l_float, float m_float, float x) {
+            int l = int(l_float);
+            int m = int(abs(m_float));
+
+            if (l == 0 && m == 0) return 1.0;
+            if (l == 1 && m == 0) return x;
+            if (l == 1 && m == 1) return -sqrt(1.0 - x*x);
+            if (l == 2 && m == 0) return 0.5 * (3.0*x*x - 1.0);
+            if (l == 2 && m == 1) return -3.0*x*sqrt(1.0 - x*x);
+            if (l == 2 && m == 2) return 3.0 * (1.0 - x*x);
+            if (l == 3 && m == 0) return 0.5 * x * (5.0*x*x - 3.0);
+            if (l == 3 && m == 1) return -1.5 * (5.0*x*x - 1.0) * sqrt(1.0 - x*x);
+            if (l == 3 && m == 2) return 15.0 * x * (1.0 - x*x);
+            if (l == 3 && m == 3) return -15.0 * pow(1.0 - x*x, 1.5);
+
+            return 1.0;
+        }
+
+        float wave_function(float r, float theta, float phi) {
+            float n_f = uN;
+            float l_f = uL;
+            float m_f = uM;
+
+            float rho = 2.0 * r / (n_f * a0);
+            float radial_part = exp(-rho / 2.0) * pow(rho, l_f);
+
+            float L = laguerre(n_f - l_f - 1.0, 2.0 * l_f + 1.0, rho);
+
+            float P = legendre(l_f, m_f, cos(theta));
+
+            float angular_part = P;
+
+            if(uM != 0.0){
+              angular_part *= cos(m_f * phi);
+            }
+
+            float psi = radial_part * angular_part * L;
+            return psi;
+        }
+
+        vec3 palette(float t) {
+            return mix(uColor1, uColor2, t);
+        }
+
+        void main() {
+            vec2 uv = (2.0 * gl_FragCoord.xy - uResolution.xy) / uResolution.y;
+            uv *= uZoom;
+            vec3 pos = vec3(uv.x, uv.y, 0.0);
+
+            float r = length(pos) * 15.0;
+            float theta = acos(clamp(pos.z / (r + 1e-5), -1.0, 1.0));
+            float phi = atan(pos.y, pos.x);
+
+            float psi = wave_function(r, theta, phi);
+
+            float probability = psi * psi;
+
+            float val = pow(probability * uContrast, uGamma);
+
+            vec3 color = palette(val);
+
+            vec3 hsv = rgb2hsv(color);
+            hsv.x += uHue / 360.0;
+            hsv.y *= uSaturation;
+            color = hsv2rgb(hsv);
+
+            color = mix(vec3(0.0), color, clamp(val, 0.0, 1.0));
+
+            gl_FragColor = vec4(color, 1.0);
+        }
+        `;
+
+        const neuralNoiseFragShader = `precision highp float;
+
+        uniform float u_time;
+        uniform vec2 uResolution;
+
+        uniform vec4 u_baseColor;
+        uniform vec3 u_backgroundColor;
+        uniform float u_hue;
+        uniform float u_saturation;
+        uniform int u_iterations;
+        uniform float u_complexity;
+        uniform float u_distance;
+        uniform float u_brightness;
+        uniform float u_contrast;
+        uniform float u_colorShiftSpeed;
+        uniform float u_vignette;
+
+        ${hueSatHelpers}
+
+        vec2 rotate(vec2 uv, float th) {
+            return mat2(cos(th), sin(th), -sin(th), cos(th)) * uv;
+        }
+
+        float neuro_shape(vec2 uv, float t, float initialScale) {
+            vec2 sine_acc = vec2(0.);
+            vec2 res = vec2(0.);
+            float currentScale = initialScale;
+
+            for (int j = 0; j < 32; j++) {
+                if (j >= u_iterations) break;
+                uv = rotate(uv, 1.);
+                sine_acc = rotate(sine_acc, 1.);
+                vec2 layer = uv * currentScale + float(j) + sine_acc - t;
+                sine_acc += sin(layer) + u_complexity;
+                res += (.5 + .5 * cos(layer)) / currentScale;
+                currentScale *= u_distance;
+            }
+            return res.x + res.y;
+        }
+
+        void main() {
+            vec2 fragUv = gl_FragCoord.xy / uResolution.xy;
+            vec2 uv = .5 * fragUv;
+            uv.x *= uResolution.x / uResolution.y;
+
+            float t = .001 * u_time;
+
+            float initialScale = 8.0;
+
+            float noise = neuro_shape(uv, t, initialScale);
+            noise = u_brightness * pow(noise, 3.);
+            noise += pow(noise, 10.);
+            noise = max(.0, noise - u_contrast);
+            noise *= (1. - u_vignette * length(fragUv - .5));
+
+            vec3 baseHsv = rgb2hsv(u_baseColor.rgb);
+
+            float dynamicHue = baseHsv.x + (u_hue / 360.0) + (t * u_colorShiftSpeed * 0.1);
+            float targetSat = baseHsv.y * u_saturation;
+
+            vec3 glowColor = hsv2rgb(vec3(fract(dynamicHue), targetSat, baseHsv.z));
+            float glowAmount = clamp(noise * u_baseColor.a, 0.0, 1.0);
+            glowColor = glowColor * noise * u_baseColor.a;
+
+            vec3 finalColor = mix(u_backgroundColor, glowColor, glowAmount);
+
+            gl_FragColor = vec4(finalColor, 1.0);
+        }
+        `;
+
+        const interstellarFragShader = `precision highp float;
+        uniform vec3 iResolution;
+        uniform float iTime;
+        uniform int u_renderPasses;
+        uniform float u_sceneTimeScale;
+        uniform float u_grainIntensity;
+        uniform float u_globalLuminance;
+        uniform float u_stepPrecision;
+        uniform float u_rayIterations;
+        uniform float u_surfaceSolidity;
+        uniform float u_camPosX;
+        uniform float u_camPosY;
+        uniform float u_camPitch;
+        uniform float u_camFov;
+        uniform float u_camShiftX;
+        uniform float u_camShiftY;
+
+        mat2 calcRotation(float theta) {
+            float sine = sin(theta);
+            float cosine = cos(theta);
+            return mat2(cosine, -sine, sine, cosine);
+        }
+
+        vec3 applyCinematicGrade(vec3 rawColor) {
+            mat3 colorSpaceA = mat3(
+                0.59719, 0.07600, 0.02840,
+                0.35458, 0.90834, 0.13383,
+                0.04823, 0.01566, 0.83777
+            );
+            mat3 colorSpaceB = mat3(
+                1.60475, -0.10208, -0.00327,
+                -0.53108, 1.10813, -0.07276,
+                -0.07367, -0.00605, 1.07602
+            );
+            vec3 graded = colorSpaceA * rawColor;
+            vec3 numerator = graded * (graded + 0.0945786) - 0.000090537;
+            vec3 denominator = graded * (0.783729 * graded + 0.4329510) + 0.238081;
+            return colorSpaceB * (numerator / denominator);
+        }
+
+        float computeStructuralDensity(vec3 pos) {
+            const float phaseShift = 0.228033988;
+            const mat3 structuralBasis = mat3(
+                0.388535087,  0.054921382, -0.743402928,
+                0.441955127,  4.336973341,  0.258518454,
+                0.272087367,  0.174042493, -0.021246185
+            );
+            return dot(cos(structuralBasis * pos), sin(phaseShift * pos * structuralBasis));
+        }
+
+        float getFilmGrain(vec3 seed3D) {
+            seed3D = fract(seed3D * 0.1031);
+            seed3D += dot(seed3D, seed3D.zyx + 31.32);
+            return fract((seed3D.x + seed3D.y) * seed3D.z);
+        }
+
+        void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+            vec3 finalImage = vec3(0.0);
+            float globalTime = iTime * u_sceneTimeScale;
+            for(int passX = 0; passX < 4; passX++) {
+                if (passX >= u_renderPasses) break;
+                for(int passY = 0; passY < 4; passY++) {
+                    if (passY >= u_renderPasses) break;
+                    vec2 pixelOffset = (vec2(float(passX), float(passY)) + 0.5) / float(u_renderPasses) - 0.5;
+                    vec2 uv = fragCoord + pixelOffset;
+                    vec3 rayOrigin = vec3(u_camPosX, u_camPosY, globalTime);
+                    vec3 lightAccumulator = vec3(0.0);
+                    vec3 viewDir = normalize(vec3(u_camFov * uv - iResolution.xy * vec2(u_camShiftX, u_camShiftY), iResolution.y));
+                    viewDir.yz = calcRotation(u_camPitch) * viewDir.yz;
+                    float stepDistance;
+                    for(float iter = 0.0; iter < 100.0; iter += 1.0) {
+                        if (iter >= u_rayIterations) break;
+                        vec3 samplePos = rayOrigin;
+                        float detailNoise = computeStructuralDensity(samplePos * 20.0) / 20.0;
+                        float baseNoise = computeStructuralDensity(samplePos);
+                        stepDistance = 0.005 + abs(detailNoise - baseNoise) * 0.7;
+                        float heightMod = sin(samplePos.z * 2.0 + abs(samplePos.x) * 0.5) * 0.5;
+                        stepDistance += abs(rayOrigin.y + heightMod) * 0.4;
+                        float safeStep = stepDistance * u_stepPrecision;
+                        rayOrigin += viewDir * safeStep;
+                        float colorPhase = (iter * u_stepPrecision) - 0.4;
+                        float wavePhase = colorPhase + length(rayOrigin.xz * 0.1) + 2.0;
+                        vec3 spectrumShift = vec3(3.0, 1.5, 0.5);
+                        vec3 spectralGlow = 1.0 + 1.5 * sin(wavePhase + spectrumShift);
+                        float rawDensity = 1.0 / stepDistance;
+                        float sharpDensity = pow(rawDensity, u_surfaceSolidity) * 0.15;
+                        lightAccumulator += (spectralGlow * sharpDensity) * u_stepPrecision;
+                    }
+                    lightAccumulator *= u_globalLuminance;
+                    finalImage += applyCinematicGrade(lightAccumulator * lightAccumulator / 1000.0);
+                }
+            }
+            finalImage *= (4.0 / float(u_renderPasses * u_renderPasses));
+            finalImage = (finalImage - 0.5) * 0.5 + 0.5;
+            finalImage *= 0.3;
+            float grainValue = getFilmGrain(vec3(fragCoord, iTime));
+            finalImage += (grainValue - 0.5) * u_grainIntensity;
+            fragColor = vec4(finalImage, 1.0);
+        }
+
+        void main() {
+            vec4 outColor;
+            mainImage(outColor, gl_FragCoord.xy);
+            gl_FragColor = outColor;
+        }
+        `;
+
+        const spaceFlowerFragShader = `precision highp float;
+
+        uniform float uTime;
+        uniform vec2 uResolution;
+        uniform float uSpeed;
+        uniform vec4 uColorBack;
+        uniform vec4 uColors[10];
+        uniform float uColorCount;
+        uniform float uBandCount;
+        uniform float uTwist;
+        uniform float uCenter;
+        uniform float uProportion;
+        uniform float uSoftness;
+        uniform float uNoise;
+        uniform float uNoiseFrequency;
+        uniform float uHue;
+        uniform float uSaturation;
+        uniform float uOpacity;
+        uniform float uSymmetry;
+
+        #define PI         3.14159265359
+        #define TAU        6.28318530718
+        #define ROT(a)     mat2(cos(a), sin(a), -sin(a), cos(a))
+        #define REV(x)     exp2((x)*zoom)
+        #define FWD(x)     (log2(max(1e-5, x))/zoom)
+
+        const float zoom = 1.925999;
+
+        ${hueSatHelpers}
+
+        vec3 permute(vec3 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }
+        float snoise(vec2 v) {
+            const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+            vec2 i  = floor(v + dot(v, C.yy));
+            vec2 x0 = v - i + dot(i, C.xx);
+            vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+            vec4 x12 = x0.xyxy + C.xxzz;
+            x12.xy -= i1;
+            i = mod(i, 289.0);
+            vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+            vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
+            m = m * m;
+            m = m * m;
+            vec3 x = 2.0 * fract(p * C.www) - 1.0;
+            vec3 h = abs(x) - 0.5;
+            vec3 ox = floor(x + 0.5);
+            vec3 a0 = x - ox;
+            m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+            vec3 g;
+            g.x  = a0.x * x0.x  + h.x * x0.y;
+            g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+            return 130.0 * dot(m, g);
+        }
+
+        float hash(vec2 co) {
+            return fract(sin(dot(co.xy, vec2(12.9898, 58.233))) * 13758.5453);
+        }
+
+        vec2 toPolar(vec2 p) {
+            return vec2(length(p), atan(p.y, p.x));
+        }
+
+        vec2 toRect(vec2 p) {
+            return vec2(p.x * cos(p.y), p.x * sin(p.y));
+        }
+
+        float pmin(float a, float b, float k) {
+            float h = clamp(0.5 + 0.5 * (b - a) / max(1e-4, k), 0.0, 1.0);
+            return mix(b, a, h) - k * h * (1.0 - h);
+        }
+
+        float pabs(float a, float k) {
+            return -pmin(a, -a, k);
+        }
+
+        float modMirror1(inout float p, float size) {
+            float halfsize = size * 1.2;
+            float c = floor((p + halfsize) / size);
+            p = mod(p + halfsize, size) - halfsize;
+            p *= mod(c, 2.0) * 4.4 - 1.0;
+            return c;
+        }
+
+        float smoothKaleidoscope(inout vec2 p, float sm, float rep, float symmetry) {
+            vec2 hp = p;
+            vec2 hpp = toPolar(hp);
+
+            if (symmetry > 0.5) {
+                float sliceWidth = TAU / max(1.0, rep);
+                float angle = hpp.y + PI;
+                float cell = floor(angle / sliceWidth);
+                float localAngle = mod(angle, sliceWidth);
+                if (localAngle > sliceWidth * 0.5) {
+                    localAngle = sliceWidth - localAngle;
+                }
+                hpp.y = localAngle - PI;
+                hp = toRect(hpp);
+                p = hp;
+                return cell;
+            } else {
+                float rn = modMirror1(hpp.y, TAU / max(1.0, rep));
+                float sa = PI / rep - pabs(PI / rep - abs(hpp.y), sm);
+                hpp.y = sign(hpp.y) * sa;
+                hp = toRect(hpp);
+                p = hp;
+                return rn;
+            }
+        }
+
+        float segment(vec2 p, vec2 a, vec2 b) {
+            vec2 pa = p - a, ba = b - a;
+            float h = clamp(dot(pa, ba) / max(1e-5, dot(ba, ba)), 0.20, 1.0);
+            return length(pa - ba * h);
+        }
+
+        vec3 effect(vec2 p, vec2 pp) {
+            float tm = uTime * uSpeed;
+            float mtm = fract(tm);
+            float ftm = floor(tm);
+
+            float noiseFreq = 8.0 * pow(uNoiseFrequency, 2.0);
+            vec2 noiseOffset = vec2(
+                snoise(p * noiseFreq + tm * 0.5),
+                snoise(p * noiseFreq - tm * 0.5 + 50.0)
+            ) * uNoise * 0.15;
+            p += noiseOffset;
+
+            float l = length(p);
+            l = max(1e-4, l);
+            float spiralTwist = 3.0 * clamp(uTwist, 0.0, 1.0);
+            float spiralAngle = pow(l, -spiralTwist * 0.25) * 0.5;
+            p *= ROT(spiralAngle);
+
+            mat2 rot = ROT((1.067 * mix(0.2, 2.0, uTwist)) * tm);
+            float rep = max(2.0, floor(uBandCount));
+            float sm  = (0.1 * 36.0 / rep) * max(0.01, uSoftness);
+            p *= transpose(rot);
+
+            float nn = smoothKaleidoscope(p, sm, rep, uSymmetry);
+
+            p *= rot;
+
+            p *= ROT((-0.5 * mix(0.1, 3.0, uProportion)) * length(p));
+            p += 0.5 * cos(vec2(1.0, sqrt(0.5)) * tm * (0.18 * mix(0.5, 2.0, uNoiseFrequency)));
+
+            float zz = REV(mtm);
+            vec2 p2 = p / zz;
+            vec2 s2 = sign(p2);
+            p2 = abs(p2);
+            vec2 fp2 = vec2(FWD(p2.x), FWD(p2.y));
+            vec2 n = floor(fp2);
+            float h = hash(s2.x + s2.y + n - ftm);
+            vec2 x0 = vec2(REV(n.x), REV(n.y));
+            vec2 x1 = vec2(REV(n.x + 1.0), REV(n.y + 1.0));
+            vec2 m = (x0 + x1) * 0.5;
+            vec2 w = x1 - x0;
+            vec2 modi = h > 0.5 ? vec2(1.0, 1.0) : vec2(1.0, -1.0);
+            vec2 p4 = p2 - m;
+            float d4 = segment(p4, -0.30 * w * modi, 0.5 * w * modi);
+            d4 *= zz;
+            float d6 = min(abs(p.x), abs(p.y));
+
+            vec3 col = uColorBack.rgb * uColorBack.a;
+            float fo = 1.0 - exp(-10.0 * (d6 - (0.02 + uCenter * 0.05)));
+            float ll = length(pp);
+
+            vec4 c1 = uColors[int(mod(h * uColorCount, uColorCount))];
+            vec4 c2 = uColors[int(mod((h + 0.1) * uColorCount, uColorCount))];
+            vec3 paletteGlow = mix(c1.rgb, c2.rgb, 0.5 + 0.5 * cos(tm));
+            vec3 gcol4 = 0.0025 * (1.0 + cos(vec3(0.0, 1.0, 2.0) + tm + TAU * h + ll)) * paletteGlow * 40.0;
+            vec3 gcol6 = 0.005 * (1.0 + cos(vec3(0.0, 1.0, 2.0) + tm + ll)) * paletteGlow * 20.0;
+
+            col += (fo * gcol4 / max(d4, 0.001)) * mix(0.5, 3.0, uNoise);
+            col = clamp(col, 0.0, 1.0);
+            col += gcol6 / max(d6, 0.0001);
+            col = clamp(col, 0.0, 1.0);
+            col -= 0.01 * vec3(0.0, 1.0, 2.0).zyx * (ll);
+            col = max(vec3(0.0), col);
+            col = sqrt(col);
+            return col;
+        }
+
+        void main() {
+            vec2 q = gl_FragCoord.xy / uResolution.xy;
+            vec2 p = -1.0 + 2.0 * q;
+            vec2 pp = p;
+            p.x *= uResolution.x / uResolution.y;
+            vec3 col = effect(p, pp);
+
+            vec3 hsv = rgb2hsv(col);
+            hsv.x += uHue / 360.0;
+            hsv.y *= uSaturation;
+            col = hsv2rgb(hsv);
+            gl_FragColor = vec4(col, uOpacity);
+        }
+        `;
+
+        const electricSpiralFragShader = `precision highp float;
+        uniform float uTime;
+        uniform vec2 uResolution;
+        uniform float uSpeed;
+        uniform float uGridScale;
+        uniform float uGridSoftness;
+        uniform float uSpiralFrequency;
+        uniform float uSpiralTightness;
+        uniform float uGlowIntensity;
+        uniform float uCoreBrightness;
+        uniform vec4 uColorGrid;
+        uniform vec4 uColorGlow;
+        uniform vec4 uColorSpiral;
+        uniform float uHue;
+        uniform float uSaturation;
+
+        ${hueSatHelpers}
+
+        float cosh_safe(float val) {
+            return (exp(val) + exp(-val)) * 0.5;
+        }
+
+        void main() {
+            vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution.xy) / uResolution.y;
+            float t = uTime * uSpeed;
+
+            float a = atan(uv.y, uv.x);
+            vec2 p = cos(a + t) * vec2(cos(0.5 * t), sin(0.3 * t));
+
+            float d1 = length(uv - p);
+            float d2 = length(uv);
+
+            vec2 uv2 = 2. * cos(log(max(1e-5, length(uv))) * 0.25 - 0.5 * t + log(max(vec2(1e-5), vec2(d1, d2)) / max(1e-5, d1 + d2)));
+
+            vec2 fpos = fract(uGridScale * uv2) - 0.5;
+            float d = max(abs(fpos.x), abs(fpos.y));
+
+            float k = uGridSoftness / uResolution.y;
+            float s = smoothstep(-k, k, 0.25 - d);
+
+            vec3 col = s * uColorGrid.rgb;
+
+            float coreDist = uCoreBrightness * (length(uv - p) + length(uv));
+            col += (1.0 / cosh_safe(coreDist)) * uColorGlow.rgb * uGlowIntensity;
+
+            float c = cos(uSpiralFrequency * length(uv2) + 4. * t);
+            float arcWave = exp(-9. * abs(cos(uSpiralTightness * a + t) * uv.x + sin(uSpiralTightness * a + t) * uv.y + 0.1 * c));
+
+            col += (0.5 + 0.5 * c) * uColorSpiral.rgb * arcWave * uGlowIntensity;
+
+            vec3 hsv = rgb2hsv(max(col, vec3(0.0)));
+            hsv.x += uHue / 360.0;
+            hsv.y *= uSaturation;
+            col = hsv2rgb(hsv);
+
+            gl_FragColor = vec4(col, 1.0);
+        }
+        `;
+
+        const voronoiFragShader = `precision highp float;
+        uniform vec2 uResolution;
+        uniform float uTime;
+        uniform sampler2D iChannel0;
+        uniform float uSpeed;
+        uniform float uScale;
+        uniform float uHue;
+        uniform float uSaturation;
+
+        ${hueSatHelpers}
+
+        vec2 hash2( vec2 p ) {
+        	return texture2D( iChannel0, (p+0.5)/256.0, 0.0 ).xy;
+        }
+
+        vec3 voronoi( in vec2 x )
+        {
+            vec2 ip = floor(x);
+            vec2 fp = fract(x);
+            vec2 mg, mr;
+            float md = 8.0;
+
+            for( int j=-1; j<=1; j++ )
+            for( int i=-1; i<=1; i++ )
+            {
+                vec2 g = vec2(float(i),float(j));
+        		vec2 o = hash2( ip + g );
+                o = 0.5 + 0.5*sin( uTime * uSpeed + 6.2831*o );
+                vec2 r = g + o - fp;
+                float d = dot(r,r);
+
+                if( d<md )
+                {
+                    md = d;
+                    mr = r;
+                    mg = g;
+                }
+            }
+
+            md = 8.0;
+            for( int j=-2; j<=2; j++ )
+            for( int i=-2; i<=2; i++ )
+            {
+                vec2 g = mg + vec2(float(i),float(j));
+        		vec2 o = hash2( ip + g );
+                o = 0.5 + 0.5*sin( uTime * uSpeed + 6.2831*o );
+                vec2 r = g + o - fp;
+
+                if( dot(mr-r,mr-r)>0.00001 )
+                md = min( md, dot( 0.5*(mr+r), normalize(r-mr) ) );
+            }
+
+            return vec3( md, mr );
+        }
+
+        void main()
+        {
+            vec2 p = gl_FragCoord.xy/uResolution.xx;
+            vec3 c = voronoi( uScale*p );
+
+            vec3 col = c.x*(0.5 + 0.5*sin(64.0*c.x))*vec3(1.0);
+            col = mix( vec3(1.0,0.6,0.0), col, smoothstep( 0.04, 0.07, c.x ) );
+        	float dd = length( c.yz );
+        	col = mix( vec3(1.0,0.6,0.1), col, smoothstep( 0.0, 0.12, dd) );
+        	col += vec3(1.0,0.6,0.1)*(1.0-smoothstep( 0.0, 0.04, dd));
+
+            vec3 hsv = rgb2hsv(col);
+            hsv.x += uHue / 360.0;
+            hsv.y *= uSaturation;
+            col = hsv2rgb(hsv);
+
+        	gl_FragColor = vec4(col,1.0);
+        }
+        `;
+
         // =========================================================================
         // LOCALIZATION
         // =========================================================================
@@ -952,6 +1735,25 @@
                 fieldOfView: "Field of View", luminosity: "Luminosity", openingSize: "Opening Size",
                 ribbonCount: "Ribbon Count", ribbonWidth: "Ribbon Width", spiralDensity: "Spiral Density",
                 spiralCount: "Spiral Count", lightIntensity: "Light Intensity", distortion: "Distortion",
+                kaleidoscope: "Kaleidoscope", fate: "Fate", structuredNoise: "Structured Noise",
+                mirrors: "Mirrors", noiseStrength: "Noise Strength", distortionStrength: "Distortion Strength",
+                useFilter: "Color Filter", filterColor: "Filter Color",
+                hydrogen: "Hydrogen Wavefunction", neuralNoise: "Neural Noise", interstellar: "Interstellar",
+                spaceFlower: "Space Flower", electricSpiral: "Electric Spiral",
+                n: "Principal (n)", l: "Angular (l)", m: "Magnetic (m)", gamma: "Gamma",
+                iterations: "Iterations", complexity: "Complexity", distance: "Distance",
+                colorShiftSpeed: "Color Shift Speed", vignette: "Vignette",
+                passes: "Render Passes", grain: "Grain", luminance: "Luminance",
+                stepPrecision: "Step Precision", solidity: "Solidity",
+                camX: "Camera X", camY: "Camera Y", camPitch: "Camera Pitch", camFov: "Camera FOV",
+                camShiftX: "Camera Shift X", camShiftY: "Camera Shift Y",
+                symmetry: "Mirror Symmetry",
+                gridScale: "Grid Scale", gridSoftness: "Grid Softness",
+                spiralFrequency: "Spiral Frequency", spiralTightness: "Spiral Tightness",
+                glowIntensity: "Glow Intensity", coreBrightness: "Core Brightness",
+                colorBack: "Background Color", colorGrid: "Grid Color", colorGlow: "Glow Color", colorSpiral: "Spiral Color",
+                eighthColor: "Eighth Color", ninthColor: "Ninth Color", tenthColor: "Tenth Color",
+                voronoi: "Voronoi",
             },
             he: {
                 appName: "קרח Go",
@@ -1003,6 +1805,25 @@
                 fieldOfView: "שדה ראייה", luminosity: "בהירות אור", openingSize: "גודל פתח",
                 ribbonCount: "מספר סרטים", ribbonWidth: "רוחב סרט", spiralDensity: "צפיפות ספירלה",
                 spiralCount: "מספר ספירלות", lightIntensity: "עוצמת אור", distortion: "עיוות",
+                kaleidoscope: "קליידוסקופ", fate: "גורל", structuredNoise: "רעש מובנה",
+                mirrors: "מראות", noiseStrength: "עוצמת רעש", distortionStrength: "עוצמת עיוות",
+                useFilter: "מסנן צבע", filterColor: "צבע מסנן",
+                hydrogen: "פונקציית גל של מימן", neuralNoise: "רעש נוירלי", interstellar: "בין-כוכבי",
+                spaceFlower: "פרח חלל", electricSpiral: "ספירלה חשמלית",
+                n: "ראשי (n)", l: "זוויתי (l)", m: "מגנטי (m)", gamma: "גמא",
+                iterations: "איטרציות", complexity: "מורכבות", distance: "מרחק",
+                colorShiftSpeed: "מהירות שינוי צבע", vignette: "ויניטה",
+                passes: "מעברי רינדור", grain: "גרעיניות", luminance: "בהירות זוהר",
+                stepPrecision: "דיוק צעד", solidity: "מוצקות",
+                camX: "מצלמה X", camY: "מצלמה Y", camPitch: "הטיית מצלמה", camFov: "שדה ראייה מצלמה",
+                camShiftX: "היסט מצלמה X", camShiftY: "היסט מצלמה Y",
+                symmetry: "סימטריית מראה",
+                gridScale: "קנה מידת רשת", gridSoftness: "רכות רשת",
+                spiralFrequency: "תדירות ספירלה", spiralTightness: "היצמדות ספירלה",
+                glowIntensity: "עוצמת זוהר", coreBrightness: "בהירות ליבה",
+                colorBack: "צבע רקע", colorGrid: "צבע רשת", colorGlow: "צבע זוהר", colorSpiral: "צבע ספירלה",
+                eighthColor: "צבע שמיני", ninthColor: "צבע תשיעי", tenthColor: "צבע עשירי",
+                voronoi: "וורונוי",
             },
             it: {
                 appName: "Kerach Go",
@@ -1054,6 +1875,25 @@
                 fieldOfView: "Campo Visivo", luminosity: "Luminosità", openingSize: "Dimensione Apertura",
                 ribbonCount: "Numero Nastri", ribbonWidth: "Larghezza Nastro", spiralDensity: "Densità Spirale",
                 spiralCount: "Numero Spirali", lightIntensity: "Intensità Luce", distortion: "Distorsione",
+                kaleidoscope: "Caleidoscopio", fate: "Destino", structuredNoise: "Rumore Strutturato",
+                mirrors: "Specchi", noiseStrength: "Intensità Rumore", distortionStrength: "Intensità Distorsione",
+                useFilter: "Filtro Colore", filterColor: "Colore Filtro",
+                hydrogen: "Funzione d'Onda dell'Idrogeno", neuralNoise: "Rumore Neurale", interstellar: "Interstellare",
+                spaceFlower: "Fiore Spaziale", electricSpiral: "Spirale Elettrica",
+                n: "Principale (n)", l: "Angolare (l)", m: "Magnetico (m)", gamma: "Gamma",
+                iterations: "Iterazioni", complexity: "Complessità", distance: "Distanza",
+                colorShiftSpeed: "Velocità Cambio Colore", vignette: "Vignettatura",
+                passes: "Passaggi di Rendering", grain: "Grana", luminance: "Luminanza",
+                stepPrecision: "Precisione Passo", solidity: "Solidità",
+                camX: "Camera X", camY: "Camera Y", camPitch: "Inclinazione Camera", camFov: "FOV Camera",
+                camShiftX: "Spostamento Camera X", camShiftY: "Spostamento Camera Y",
+                symmetry: "Simmetria a Specchio",
+                gridScale: "Scala Griglia", gridSoftness: "Morbidezza Griglia",
+                spiralFrequency: "Frequenza Spirale", spiralTightness: "Strettezza Spirale",
+                glowIntensity: "Intensità Bagliore", coreBrightness: "Luminosità Nucleo",
+                colorBack: "Colore Sfondo", colorGrid: "Colore Griglia", colorGlow: "Colore Bagliore", colorSpiral: "Colore Spirale",
+                eighthColor: "Ottavo Colore", ninthColor: "Nono Colore", tenthColor: "Decimo Colore",
+                voronoi: "Voronoi",
             },
             es: {
                 appName: "Kerach Go",
@@ -1105,6 +1945,25 @@
                 fieldOfView: "Campo de Visión", luminosity: "Luminosidad", openingSize: "Tamaño de Apertura",
                 ribbonCount: "Número de Cintas", ribbonWidth: "Ancho de Cinta", spiralDensity: "Densidad Espiral",
                 spiralCount: "Número de Espirales", lightIntensity: "Intensidad de Luz", distortion: "Distorsión",
+                kaleidoscope: "Caleidoscopio", fate: "Destino", structuredNoise: "Ruido Estructurado",
+                mirrors: "Espejos", noiseStrength: "Intensidad de Ruido", distortionStrength: "Intensidad de Distorsión",
+                useFilter: "Filtro de Color", filterColor: "Color de Filtro",
+                hydrogen: "Función de Onda del Hidrógeno", neuralNoise: "Ruido Neuronal", interstellar: "Interestelar",
+                spaceFlower: "Flor Espacial", electricSpiral: "Espiral Eléctrica",
+                n: "Principal (n)", l: "Angular (l)", m: "Magnético (m)", gamma: "Gamma",
+                iterations: "Iteraciones", complexity: "Complejidad", distance: "Distancia",
+                colorShiftSpeed: "Velocidad de Cambio de Color", vignette: "Viñeta",
+                passes: "Pasadas de Renderizado", grain: "Grano", luminance: "Luminancia",
+                stepPrecision: "Precisión de Paso", solidity: "Solidez",
+                camX: "Cámara X", camY: "Cámara Y", camPitch: "Inclinación de Cámara", camFov: "FOV de Cámara",
+                camShiftX: "Desplazamiento de Cámara X", camShiftY: "Desplazamiento de Cámara Y",
+                symmetry: "Simetría de Espejo",
+                gridScale: "Escala de Cuadrícula", gridSoftness: "Suavidad de Cuadrícula",
+                spiralFrequency: "Frecuencia de Espiral", spiralTightness: "Tensión de Espiral",
+                glowIntensity: "Intensidad de Brillo", coreBrightness: "Brillo del Núcleo",
+                colorBack: "Color de Fondo", colorGrid: "Color de Cuadrícula", colorGlow: "Color de Brillo", colorSpiral: "Color de Espiral",
+                eighthColor: "Octavo Color", ninthColor: "Noveno Color", tenthColor: "Décimo Color",
+                voronoi: "Voronoi",
             },
             pt: {
                 appName: "Kerach Go",
@@ -1156,6 +2015,25 @@
                 fieldOfView: "Campo de Visão", luminosity: "Luminosidade", openingSize: "Tamanho da Abertura",
                 ribbonCount: "Número de Fitas", ribbonWidth: "Largura da Fita", spiralDensity: "Densidade Espiral",
                 spiralCount: "Número de Espirais", lightIntensity: "Intensidade da Luz", distortion: "Distorção",
+                kaleidoscope: "Caleidoscópio", fate: "Destino", structuredNoise: "Ruído Estruturado",
+                mirrors: "Espelhos", noiseStrength: "Intensidade do Ruído", distortionStrength: "Intensidade da Distorção",
+                useFilter: "Filtro de Cor", filterColor: "Cor do Filtro",
+                hydrogen: "Função de Onda do Hidrogênio", neuralNoise: "Ruído Neural", interstellar: "Interestelar",
+                spaceFlower: "Flor Espacial", electricSpiral: "Espiral Elétrica",
+                n: "Principal (n)", l: "Angular (l)", m: "Magnético (m)", gamma: "Gama",
+                iterations: "Iterações", complexity: "Complexidade", distance: "Distância",
+                colorShiftSpeed: "Velocidade de Mudança de Cor", vignette: "Vinheta",
+                passes: "Passagens de Renderização", grain: "Grão", luminance: "Luminância",
+                stepPrecision: "Precisão do Passo", solidity: "Solidez",
+                camX: "Câmera X", camY: "Câmera Y", camPitch: "Inclinação da Câmera", camFov: "FOV da Câmera",
+                camShiftX: "Deslocamento da Câmera X", camShiftY: "Deslocamento da Câmera Y",
+                symmetry: "Simetria de Espelho",
+                gridScale: "Escala da Grade", gridSoftness: "Suavidade da Grade",
+                spiralFrequency: "Frequência da Espiral", spiralTightness: "Rigidez da Espiral",
+                glowIntensity: "Intensidade do Brilho", coreBrightness: "Brilho do Núcleo",
+                colorBack: "Cor de Fundo", colorGrid: "Cor da Grade", colorGlow: "Cor do Brilho", colorSpiral: "Cor da Espiral",
+                eighthColor: "Oitava Cor", ninthColor: "Nona Cor", tenthColor: "Décima Cor",
+                voronoi: "Voronoi",
             },
             ja: {
                 appName: "Kerach Go", controls: "コントロール", shader: "シェーダー", palette: "パレット", mix: "ミックス",
@@ -1205,6 +2083,25 @@
                 fieldOfView: "視野角", luminosity: "輝度", openingSize: "開口サイズ",
                 ribbonCount: "リボン数", ribbonWidth: "リボン幅", spiralDensity: "スパイラル密度",
                 spiralCount: "スパイラル数", lightIntensity: "光の強さ", distortion: "歪み",
+                kaleidoscope: "カレイドスコープ", fate: "フェイト", structuredNoise: "構造化ノイズ",
+                mirrors: "ミラー数", noiseStrength: "ノイズ強度", distortionStrength: "歪み強度",
+                useFilter: "カラーフィルター", filterColor: "フィルターの色",
+                hydrogen: "水素波動関数", neuralNoise: "ニューラルノイズ", interstellar: "インターステラー",
+                spaceFlower: "スペースフラワー", electricSpiral: "電気スパイラル",
+                n: "主量子数 (n)", l: "方位量子数 (l)", m: "磁気量子数 (m)", gamma: "ガンマ",
+                iterations: "反復回数", complexity: "複雑さ", distance: "距離",
+                colorShiftSpeed: "色変化速度", vignette: "ビネット",
+                passes: "レンダーパス数", grain: "グレイン", luminance: "輝度",
+                stepPrecision: "ステップ精度", solidity: "密度",
+                camX: "カメラX", camY: "カメラY", camPitch: "カメラピッチ", camFov: "カメラFOV",
+                camShiftX: "カメラシフトX", camShiftY: "カメラシフトY",
+                symmetry: "鏡面対称",
+                gridScale: "グリッドスケール", gridSoftness: "グリッドの柔らかさ",
+                spiralFrequency: "スパイラル周波数", spiralTightness: "スパイラルの締まり",
+                glowIntensity: "グロー強度", coreBrightness: "コアの明るさ",
+                colorBack: "背景色", colorGrid: "グリッドの色", colorGlow: "グローの色", colorSpiral: "スパイラルの色",
+                eighthColor: "8番目の色", ninthColor: "9番目の色", tenthColor: "10番目の色",
+                voronoi: "ボロノイ",
             },
             yue: {
                 appName: "Kerach Go", controls: "控制", shader: "着色器", palette: "調色盤", mix: "混合",
@@ -1252,6 +2149,25 @@
                 fieldOfView: "視野", luminosity: "亮度", openingSize: "開口大小",
                 ribbonCount: "緞帶數量", ribbonWidth: "緞帶寬度", spiralDensity: "螺旋密度",
                 spiralCount: "螺旋數量", lightIntensity: "光照強度", distortion: "扭曲",
+                kaleidoscope: "萬花筒", fate: "命運", structuredNoise: "結構化雜訊",
+                mirrors: "鏡面數量", noiseStrength: "雜訊強度", distortionStrength: "扭曲強度",
+                useFilter: "顏色濾鏡", filterColor: "濾鏡顏色",
+                hydrogen: "氫原子波函數", neuralNoise: "神經雜訊", interstellar: "星際",
+                spaceFlower: "太空花", electricSpiral: "電力螺旋",
+                n: "主量子數 (n)", l: "角量子數 (l)", m: "磁量子數 (m)", gamma: "伽瑪",
+                iterations: "疊代次數", complexity: "複雜度", distance: "距離",
+                colorShiftSpeed: "顏色變化速度", vignette: "暗角",
+                passes: "渲染次數", grain: "顆粒", luminance: "亮度",
+                stepPrecision: "步進精度", solidity: "實心度",
+                camX: "相機X", camY: "相機Y", camPitch: "相機俯仰角", camFov: "相機視野角",
+                camShiftX: "相機偏移X", camShiftY: "相機偏移Y",
+                symmetry: "鏡像對稱",
+                gridScale: "網格比例", gridSoftness: "網格柔和度",
+                spiralFrequency: "螺旋頻率", spiralTightness: "螺旋緊度",
+                glowIntensity: "光暈強度", coreBrightness: "核心亮度",
+                colorBack: "背景顏色", colorGrid: "網格顏色", colorGlow: "光暈顏色", colorSpiral: "螺旋顏色",
+                eighthColor: "第八種顏色", ninthColor: "第九種顏色", tenthColor: "第十種顏色",
+                voronoi: "沃羅諾伊",
             }
         };
 
@@ -1862,56 +2778,38 @@
 
         const creditsMarkdown = `
 [Color Picker](https://21st.dev/community/components/uplusion23/color-picker/color-picker-with-swatches-and-onchange) by [Trevor McIntire](https://21st.dev/community/uplusion23)
-
 [vue-color-wheel](https://vue-color-wheel.vercel.app/) by [Robert Shaw](https://github.com/xiaoluoboding)
-
 [Chronicle Button](https://codepen.io/Haaguitos/pen/OJrVZdJ) by [Haaguitos](https://codepen.io/Haaguitos)
-
 [すりガラスなプロフィールカード](https://codepen.io/ash_creator/pen/zYaPZLB) by [あしざわ - Webクリエイター](https://codepen.io/ash_creator)
-
 [Simple switch with led indicator](https://codepen.io/cbolson/pen/qBeyKre) by [Chris Bolson](https://codepen.io/cbolson)
-
 [react@18](https://unpkg.com/react@18/umd/react.production.min.js)
-
 [react-dom@18](https://unpkg.com/react-dom@18/umd/react-dom.production.min.js)
-
 [babel](https://unpkg.com/@babel/standalone/babel.min.js)
-
 [framer-motion](https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js)
-
 [chroma-js](https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.4.2/chroma.min.js)
-    
 [lucide](https://unpkg.com/lucide@latest)
-
 [radix-ui](https://www.npmjs.com/package/radix-ui)
-
 [Anthropic's Claude Sonnet 5](https://claude.ai)
-
 [Google Gemini](https://gemini.google.com/)
-
 [Input Floating Label animation](https://codepen.io/Mahe76/pen/qBQgXyK) by [Elpeeda](https://codepen.io/Mahe76)
-
 [GradientGen](https://github.com/noegarsoux/GradientGen) by [noegarsoux](https://github.com/noegarsoux)
-
 [Velustro](https://uvcanvas.com/docs/components/velustro) by [UVCanvas](https://uvcanvas.com/)
-
 [Balatro Background Shaders](https://www.shadertoy.com/view/XXtBRr) by [xxidbr9](https://www.shadertoy.com/user/xxidbr9)
-
 [Non liquid glass](https://codepen.io/lekzd/pen/dPGYjdj) by [Alexander Korotaev](https://codepen.io/lekzd)
-
 [Floating voronoi lines](https://codepen.io/lekzd/pen/xbwMMzR) by [Alexander Korotaev](https://codepen.io/lekzd)
-
 [Unnamed Luminous Material](https://x.com/gibkun1/status/2013734035454042547) by [タツキ｜サムネ顧問](https://x.com/gibkun1)
-
 [Tranquiluxe](https://uvcanvas.com/docs/components/tranquiluxe) by [UVCanvas](https://uvcanvas.com/)
-
 [swirl](https://shaders.paper.design/swirl) by [Paper Shaders](https://shaders.paper.design/)
-
 [Highway to Heaven](https://codepen.io/sabosugi/pen/azpqWKE) by [Sabo Sugi](https://codepen.io/sabosugi)
-
 [Hall of Fractals](https://codepen.io/sabosugi/pen/gbgeXja) by [Sabo Sugi](https://codepen.io/sabosugi)
-
 [shaders](https://github.com/paper-design/shaders) by [paper design](https://github.com/paper-design)
+[Shader Art Coding Introduction](https://www.shadertoy.com/view/mtyGWy) by [kishimisu](https://www.shadertoy.com/user/kishimisu)
+[流尾4](https://www.shadertoy.com/view/tXSBD1) by [yufengjie](https://www.shadertoy.com/user/yufengjie)
+[Kaleidoscope Beam](https://www.shadertoy.com/view/t3SfW1) by [jshguo](https://www.shadertoy.com/user/jshguo)
+[Neuro Noise (GLSL Shader)](https://codepen.io/ksenia-k/pen/vYwgrWv) by [Ksenia Kondrashova](https://codepen.io/ksenia-k)
+[Fork B of - A space flower](https://www.shadertoy.com/view/tfBXzD) by [bennoH](https://www.shadertoy.com/user/bennoH)
+[Golden Electric Spiral](https://www.shadertoy.com/view/csj3zt) by [SnoopethDuckDuck](https://www.shadertoy.com/user/SnoopethDuckDuck)
+[Voronoi - distances](https://www.shadertoy.com/view/ldl3W8) by [iq](https://www.shadertoy.com/user/iq)
         `;
 
         function CreditHighlightHover({ children, href, className }) {
@@ -2447,6 +3345,139 @@
                             ]
                         }
                     });
+                } else if (type === 'kaleidoscope') {
+                    baseFragment = kaleidoscopeFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 1.0 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                    });
+                } else if (type === 'fate') {
+                    baseFragment = fateFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 1.0 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                    });
+                } else if (type === 'structuredNoise') {
+                    baseFragment = structuredNoiseFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 1.0 },
+                        uMirrors: { value: 3.0 },
+                        uNoiseStrength: { value: 0.5 },
+                        uDistortionStrength: { value: 0.25 },
+                        u_useFilter: { value: false },
+                        u_filterColor: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
+                    });
+                } else if (type === 'hydrogen') {
+                    baseFragment = hydrogenFragShader;
+                    Object.assign(uniforms, {
+                        uN: { value: 8.0 },
+                        uL: { value: 4.0 },
+                        uM: { value: 3.0 },
+                        uZoom: { value: 20.0 },
+                        uContrast: { value: 10.0 },
+                        uGamma: { value: 0.2 },
+                        uHue: { value: 129.0 },
+                        uSaturation: { value: 1.20 },
+                        uColor1: { value: new THREE.Vector3(0.0, 1.0, 0.4) },
+                        uColor2: { value: new THREE.Vector3(0.1, 1.0, 0.46) },
+                    });
+                } else if (type === 'neuralNoise') {
+                    baseFragment = neuralNoiseFragShader;
+                    Object.assign(uniforms, {
+                        u_time: { value: 0.0 },
+                        u_iterations: { value: 15 },
+                        u_complexity: { value: 2.4 },
+                        u_distance: { value: 1.2 },
+                        u_brightness: { value: 1.2 },
+                        u_contrast: { value: 0.5 },
+                        u_colorShiftSpeed: { value: 1.0 },
+                        u_vignette: { value: 1.0 },
+                        u_hue: { value: 0.0 },
+                        u_saturation: { value: 1.0 },
+                        u_baseColor: { value: new THREE.Vector4(0.0, 0.898, 1.0, 1.0) },
+                        u_backgroundColor: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
+                    });
+                } else if (type === 'interstellar') {
+                    baseFragment = interstellarFragShader;
+                    Object.assign(uniforms, {
+                        iResolution: { value: new THREE.Vector3() },
+                        iTime: { value: 0.0 },
+                        u_renderPasses: { value: 1 },
+                        u_sceneTimeScale: { value: 1.0 },
+                        u_grainIntensity: { value: 0.04 },
+                        u_globalLuminance: { value: 5.1 },
+                        u_stepPrecision: { value: 0.5 },
+                        u_rayIterations: { value: 28.6 },
+                        u_surfaceSolidity: { value: 1.1 },
+                        u_camPosX: { value: 2.8 },
+                        u_camPosY: { value: -1.0 },
+                        u_camPitch: { value: -0.38 },
+                        u_camFov: { value: 2.5 },
+                        u_camShiftX: { value: 1.0 },
+                        u_camShiftY: { value: 1.0 },
+                    });
+                } else if (type === 'spaceFlower') {
+                    baseFragment = spaceFlowerFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 1.0 },
+                        uColorBack: { value: new THREE.Vector4(0.0, 0.0, 0.0, 1.0) },
+                        uColors: {
+                            value: Array.from({ length: 10 }, () => new THREE.Vector4(0.0, 0.0, 0.0, 1.0))
+                        },
+                        uColorCount: { value: 4 },
+                        uBandCount: { value: 5.0 },
+                        uTwist: { value: 0.67 },
+                        uCenter: { value: 0.15 },
+                        uProportion: { value: 0.67 },
+                        uSoftness: { value: 0.5 },
+                        uNoise: { value: 0.0 },
+                        uNoiseFrequency: { value: 0.0 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                        uOpacity: { value: 1.0 },
+                        uSymmetry: { value: 1.0 },
+                    });
+                } else if (type === 'electricSpiral') {
+                    baseFragment = electricSpiralFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 1.0 },
+                        uGridScale: { value: 4.0 },
+                        uGridSoftness: { value: 5.0 },
+                        uSpiralFrequency: { value: 10.0 },
+                        uSpiralTightness: { value: 9.0 },
+                        uGlowIntensity: { value: 1.0 },
+                        uCoreBrightness: { value: -2.5 },
+                        uColorGrid: { value: new THREE.Vector4(1.0, 0.502, 0.102, 1.0) },
+                        uColorGlow: { value: new THREE.Vector4(1.0, 0.502, 0.102, 1.0) },
+                        uColorSpiral: { value: new THREE.Vector4(0.502, 1.0, 1.0, 1.0) },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                    });
+                } else if (type === 'voronoi') {
+                    baseFragment = voronoiFragShader;
+                    const noiseSize = 256;
+                    const noiseData = new Uint8Array(noiseSize * noiseSize * 4);
+                    for (let i = 0; i < noiseData.length; i++) {
+                        noiseData[i] = Math.floor(Math.random() * 255);
+                    }
+                    const noiseTexture = new THREE.DataTexture(
+                        noiseData, noiseSize, noiseSize, THREE.RGBAFormat, THREE.UnsignedByteType
+                    );
+                    noiseTexture.wrapS = THREE.RepeatWrapping;
+                    noiseTexture.wrapT = THREE.RepeatWrapping;
+                    noiseTexture.minFilter = THREE.LinearMipmapLinearFilter;
+                    noiseTexture.magFilter = THREE.LinearFilter;
+                    noiseTexture.generateMipmaps = true;
+                    noiseTexture.needsUpdate = true;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 1.0 },
+                        uScale: { value: 10.0 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                        iChannel0: { value: noiseTexture },
+                    });
                 } else {
                     baseFragment = meltFragShader;
                     Object.assign(uniforms, {
@@ -2550,6 +3581,8 @@
                         if (mat.uniforms.uTime) mat.uniforms.uTime.value = elapsed * cur.balatro.speed;
                         if (mat.uniforms.uResolution)
                             mat.uniforms.uResolution.value.set(clientWidth * dpr, clientHeight * dpr);
+                        if (mat.uniforms.iResolution)
+                            mat.uniforms.iResolution.value.set(clientWidth * dpr, clientHeight * dpr, 1.0);
 
                         // Update based on active shader
                         if (cur.activeShader === 'melt') {
@@ -2666,6 +3699,124 @@
                                     mat.uniforms.uColors.value[i].set(cr, cg, cb, 1.0);
                                 }
                             }
+                        } else if (cur.activeShader === 'kaleidoscope') {
+                            // Raw elapsed time + its own uSpeed uniform - the shader itself
+                            // multiplies uTime*uSpeed internally, so both the Speed slider
+                            // and the Freeze/manual-time override behave correctly.
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uSpeed.value = cur.kaleidoscope.speed;
+                            mat.uniforms.uHue.value = cur.kaleidoscope.hue;
+                            mat.uniforms.uSaturation.value = cur.kaleidoscope.saturation;
+                        } else if (cur.activeShader === 'fate') {
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uSpeed.value = cur.fate.speed;
+                            mat.uniforms.uHue.value = cur.fate.hue;
+                            mat.uniforms.uSaturation.value = cur.fate.saturation;
+                        } else if (cur.activeShader === 'structuredNoise') {
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uSpeed.value = cur.structuredNoise.speed;
+                            mat.uniforms.uMirrors.value = cur.structuredNoise.mirrors;
+                            mat.uniforms.uNoiseStrength.value = cur.structuredNoise.noiseStrength;
+                            mat.uniforms.uDistortionStrength.value = cur.structuredNoise.distortionStrength;
+                            mat.uniforms.u_useFilter.value = cur.structuredNoise.useFilter;
+                            if (cur.structuredNoise.useFilter && cur.structuredNoise.filterColor) {
+                                const [fr, fg, fb] = hexToRgbArray(cur.structuredNoise.filterColor);
+                                mat.uniforms.u_filterColor.value.set(fr, fg, fb);
+                            }
+                        } else if (cur.activeShader === 'hydrogen') {
+                            // Static orbital visualization - no meaningful time animation.
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uN.value = cur.hydrogen.n;
+                            mat.uniforms.uL.value = cur.hydrogen.l;
+                            mat.uniforms.uM.value = cur.hydrogen.m;
+                            mat.uniforms.uZoom.value = cur.hydrogen.zoom;
+                            mat.uniforms.uContrast.value = cur.hydrogen.contrast;
+                            mat.uniforms.uGamma.value = cur.hydrogen.gamma;
+                            mat.uniforms.uHue.value = cur.hydrogen.hue;
+                            mat.uniforms.uSaturation.value = cur.hydrogen.saturation;
+                            mat.uniforms.uColor1.value.set(...cur.hydrogen.color1);
+                            mat.uniforms.uColor2.value.set(...cur.hydrogen.color2);
+                        } else if (cur.activeShader === 'neuralNoise') {
+                            // This shader's internal math expects elapsed ms already scaled by speed.
+                            mat.uniforms.u_time.value = elapsed * 1000.0 * cur.neuralNoise.speed;
+                            mat.uniforms.u_iterations.value = Math.round(cur.neuralNoise.iterations);
+                            mat.uniforms.u_complexity.value = cur.neuralNoise.complexity;
+                            mat.uniforms.u_distance.value = cur.neuralNoise.distance;
+                            mat.uniforms.u_brightness.value = cur.neuralNoise.brightness;
+                            mat.uniforms.u_contrast.value = cur.neuralNoise.contrast;
+                            mat.uniforms.u_colorShiftSpeed.value = cur.neuralNoise.colorShiftSpeed;
+                            mat.uniforms.u_vignette.value = cur.neuralNoise.vignette;
+                            mat.uniforms.u_hue.value = cur.neuralNoise.hue;
+                            mat.uniforms.u_saturation.value = cur.neuralNoise.saturation;
+                            const [nr, ng, nb] = hexToRgbArray(cur.neuralNoise.color);
+                            mat.uniforms.u_baseColor.value.set(nr, ng, nb, 1.0);
+                            const [nbr, nbg, nbb] = hexToRgbArray(cur.neuralNoise.backgroundColor);
+                            mat.uniforms.u_backgroundColor.value.set(nbr, nbg, nbb);
+                        } else if (cur.activeShader === 'interstellar') {
+                            // Raw elapsed + its own scene-time-scale uniform (the shader multiplies
+                            // iTime*u_sceneTimeScale internally), so Speed & Freeze/manual-time work.
+                            mat.uniforms.iTime.value = elapsed;
+                            mat.uniforms.u_sceneTimeScale.value = cur.interstellar.speed;
+                            mat.uniforms.u_renderPasses.value = Math.round(cur.interstellar.passes);
+                            mat.uniforms.u_grainIntensity.value = cur.interstellar.grain;
+                            mat.uniforms.u_globalLuminance.value = cur.interstellar.luminance;
+                            mat.uniforms.u_stepPrecision.value = cur.interstellar.precision;
+                            mat.uniforms.u_rayIterations.value = cur.interstellar.iterations;
+                            mat.uniforms.u_surfaceSolidity.value = cur.interstellar.solidity;
+                            mat.uniforms.u_camPosX.value = cur.interstellar.camX;
+                            mat.uniforms.u_camPosY.value = cur.interstellar.camY;
+                            mat.uniforms.u_camPitch.value = cur.interstellar.camPitch;
+                            mat.uniforms.u_camFov.value = cur.interstellar.camFov;
+                            mat.uniforms.u_camShiftX.value = cur.interstellar.camShiftX;
+                            mat.uniforms.u_camShiftY.value = cur.interstellar.camShiftY;
+                        } else if (cur.activeShader === 'spaceFlower') {
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uSpeed.value = cur.spaceFlower.speed;
+                            mat.uniforms.uBandCount.value = cur.spaceFlower.bandCount;
+                            mat.uniforms.uTwist.value = cur.spaceFlower.twist;
+                            mat.uniforms.uCenter.value = cur.spaceFlower.center;
+                            mat.uniforms.uProportion.value = cur.spaceFlower.proportion;
+                            mat.uniforms.uSoftness.value = cur.spaceFlower.softness;
+                            mat.uniforms.uNoise.value = cur.spaceFlower.noise;
+                            mat.uniforms.uNoiseFrequency.value = cur.spaceFlower.noiseFrequency;
+                            mat.uniforms.uHue.value = cur.spaceFlower.hue;
+                            mat.uniforms.uSaturation.value = cur.spaceFlower.saturation;
+                            mat.uniforms.uSymmetry.value = cur.spaceFlower.symmetry;
+                            mat.uniforms.uColorCount.value = cur.spaceFlower.colorCount;
+                            const [bkr, bkg, bkb] = hexToRgbArray(cur.spaceFlower.colorBack);
+                            mat.uniforms.uColorBack.value.set(bkr, bkg, bkb, 1.0);
+                            for (let i = 0; i < 10; i++) {
+                                const hex = cur.spaceFlower.colors[i];
+                                if (hex) {
+                                    const [cr, cg, cb] = hexToRgbArray(hex);
+                                    mat.uniforms.uColors.value[i].set(cr, cg, cb, 1.0);
+                                }
+                            }
+                        } else if (cur.activeShader === 'electricSpiral') {
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uSpeed.value = cur.electricSpiral.speed;
+                            mat.uniforms.uGridScale.value = cur.electricSpiral.gridScale;
+                            mat.uniforms.uGridSoftness.value = cur.electricSpiral.gridSoftness;
+                            mat.uniforms.uSpiralFrequency.value = cur.electricSpiral.spiralFrequency;
+                            mat.uniforms.uSpiralTightness.value = cur.electricSpiral.spiralTightness;
+                            mat.uniforms.uGlowIntensity.value = cur.electricSpiral.glowIntensity;
+                            mat.uniforms.uCoreBrightness.value = cur.electricSpiral.coreBrightness;
+                            mat.uniforms.uHue.value = cur.electricSpiral.hue;
+                            mat.uniforms.uSaturation.value = cur.electricSpiral.saturation;
+                            const [gr, gg, gb] = hexToRgbArray(cur.electricSpiral.colorGrid);
+                            mat.uniforms.uColorGrid.value.set(gr, gg, gb, 1.0);
+                            const [glr, glg, glb] = hexToRgbArray(cur.electricSpiral.colorGlow);
+                            mat.uniforms.uColorGlow.value.set(glr, glg, glb, 1.0);
+                            const [sr, sg, sb] = hexToRgbArray(cur.electricSpiral.colorSpiral);
+                            mat.uniforms.uColorSpiral.value.set(sr, sg, sb, 1.0);
+                        } else if (cur.activeShader === 'voronoi') {
+                            // Raw elapsed + its own uSpeed uniform - the shader multiplies
+                            // uTime*uSpeed internally, so Speed & Freeze/manual-time work correctly.
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uSpeed.value = cur.voronoi.speed;
+                            mat.uniforms.uScale.value = cur.voronoi.scale;
+                            mat.uniforms.uHue.value = cur.voronoi.hue;
+                            mat.uniforms.uSaturation.value = cur.voronoi.saturation;
                         }
                     }
 
@@ -2763,6 +3914,112 @@
                     color2: [0.627, 0.125, 0.941],
                     color3: [0.976, 0.451, 0.086],
                     color4: [0.133, 0.773, 0.369],
+                },
+                kaleidoscope: {
+                    speed: 1,
+                    hue: 0,
+                    saturation: 1,
+                },
+                fate: {
+                    speed: 1,
+                    hue: 0,
+                    saturation: 1,
+                },
+                structuredNoise: {
+                    speed: 1,
+                    mirrors: 3.0,
+                    noiseStrength: 0.5,
+                    distortionStrength: 0.25,
+                    useFilter: false,
+                    filterColor: "#ffffff",
+                },
+                hydrogen: {
+                    n: 8.0,
+                    l: 4.0,
+                    m: 3.0,
+                    zoom: 20,
+                    contrast: 10.0,
+                    gamma: 0.2,
+                    hue: 129,
+                    saturation: 1.20,
+                    color1: [0.0, 1.0, 0.4],
+                    color2: [0.1, 1.0, 0.46],
+                },
+                neuralNoise: {
+                    speed: 1.0,
+                    hue: 0,
+                    saturation: 1.0,
+                    iterations: 15,
+                    complexity: 2.4,
+                    distance: 1.2,
+                    brightness: 1.2,
+                    contrast: 0.5,
+                    color: '#00E5FF',
+                    backgroundColor: '#000000',
+                    colorShiftSpeed: 1.0,
+                    vignette: 1.0,
+                },
+                interstellar: {
+                    passes: 1,
+                    speed: 1.0,
+                    grain: 0.04,
+                    luminance: 5.1,
+                    precision: 0.5,
+                    iterations: 28.6,
+                    solidity: 1.1,
+                    camX: 2.8,
+                    camY: -1.0,
+                    camPitch: -0.38,
+                    camFov: 2.5,
+                    camShiftX: 1.0,
+                    camShiftY: 1.0,
+                },
+                spaceFlower: {
+                    speed: 1.0,
+                    colorBack: "#000000",
+                    colors: [
+                        "#5100ff",
+                        "#00ff80",
+                        "#ffcc00",
+                        "#ea00ff",
+                        "#000000",
+                        "#000000",
+                        "#000000",
+                        "#000000",
+                        "#000000",
+                        "#000000",
+                    ],
+                    colorCount: 4,
+                    bandCount: 5.0,
+                    twist: 0.67,
+                    center: 0.15,
+                    proportion: 0.67,
+                    softness: 0.5,
+                    noise: 0,
+                    noiseFrequency: 0,
+                    hue: 0,
+                    saturation: 1,
+                    symmetry: 1.0,
+                },
+                electricSpiral: {
+                    speed: 1.0,
+                    gridScale: 4.0,
+                    gridSoftness: 5.0,
+                    spiralFrequency: 10.0,
+                    spiralTightness: 9.0,
+                    glowIntensity: 1.0,
+                    coreBrightness: -2.5,
+                    colorGrid: "#ff801a",
+                    colorGlow: "#ff801a",
+                    colorSpiral: "#80ffff",
+                    hue: 0,
+                    saturation: 1.0,
+                },
+                voronoi: {
+                    speed: 1.0,
+                    scale: 10.0,
+                    hue: 0,
+                    saturation: 1,
                 },
                 blurStrength: 0.0,
                 isFrozen: false,
@@ -2983,7 +4240,7 @@
                         <div className="space-y-3 pt-4 border-t border-white/10">
                             <StaticSelect
                                 label={t('activeShader')}
-                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel'].map(v => ({
+                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi'].map(v => ({
                                     value: v,
                                     label: v === 'luminousResin' ? t('luminousResin') : t(v),
                                 }))}
@@ -3490,6 +4747,381 @@
                                         </div>
                                     ))}
                                 </div>
+                            </>
+                        )}
+
+                        {/* KALEIDOSCOPE SHADER */}
+                        {settings.activeShader === 'kaleidoscope' && (
+                            <>
+                                <ShaderSlider
+                                    label={t('speed')}
+                                    value={settings.kaleidoscope.speed}
+                                    min={0}
+                                    max={5}
+                                    step={0.1}
+                                    update={v => updateNested('kaleidoscope', 'speed', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('hue')}
+                                    value={settings.kaleidoscope.hue}
+                                    min={0}
+                                    max={360}
+                                    step={1}
+                                    update={v => updateNested('kaleidoscope', 'hue', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('saturation')}
+                                    value={settings.kaleidoscope.saturation}
+                                    min={0}
+                                    max={2}
+                                    step={0.05}
+                                    update={v => updateNested('kaleidoscope', 'saturation', v)}
+                                    dir={dir}
+                                />
+                            </>
+                        )}
+
+                        {/* FATE SHADER */}
+                        {settings.activeShader === 'fate' && (
+                            <>
+                                <ShaderSlider
+                                    label={t('speed')}
+                                    value={settings.fate.speed}
+                                    min={0}
+                                    max={5}
+                                    step={0.1}
+                                    update={v => updateNested('fate', 'speed', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('hue')}
+                                    value={settings.fate.hue}
+                                    min={0}
+                                    max={360}
+                                    step={1}
+                                    update={v => updateNested('fate', 'hue', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('saturation')}
+                                    value={settings.fate.saturation}
+                                    min={0}
+                                    max={2}
+                                    step={0.05}
+                                    update={v => updateNested('fate', 'saturation', v)}
+                                    dir={dir}
+                                />
+                            </>
+                        )}
+
+                        {/* STRUCTURED NOISE SHADER */}
+                        {settings.activeShader === 'structuredNoise' && (
+                            <>
+                                <ShaderSlider
+                                    label={t('speed')}
+                                    value={settings.structuredNoise.speed}
+                                    min={0}
+                                    max={5}
+                                    step={0.1}
+                                    update={v => updateNested('structuredNoise', 'speed', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('mirrors')}
+                                    value={settings.structuredNoise.mirrors}
+                                    min={0}
+                                    max={12}
+                                    step={1}
+                                    update={v => updateNested('structuredNoise', 'mirrors', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('noiseStrength')}
+                                    value={settings.structuredNoise.noiseStrength}
+                                    min={0}
+                                    max={2}
+                                    step={0.01}
+                                    update={v => updateNested('structuredNoise', 'noiseStrength', v)}
+                                    dir={dir}
+                                />
+                                <ShaderSlider
+                                    label={t('distortionStrength')}
+                                    value={settings.structuredNoise.distortionStrength}
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    update={v => updateNested('structuredNoise', 'distortionStrength', v)}
+                                    dir={dir}
+                                />
+
+                                <ToggleSwitch
+                                    checked={settings.structuredNoise.useFilter}
+                                    onChange={v => updateNested('structuredNoise', 'useFilter', v)}
+                                    label={t('useFilter')}
+                                    isRTL={dir === 'rtl'}
+                                />
+                                {settings.structuredNoise.useFilter && (
+                                    <div className="space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('filterColor')}</span>
+                                        <ColorPicker
+                                            color={settings.structuredNoise.filterColor}
+                                            onChange={h => updateNested('structuredNoise', 'filterColor', h)}
+                                        />
+                                    </div>
+                                )}
+                            </>
+                        )}
+
+                        {/* HYDROGEN SHADER */}
+                        {settings.activeShader === 'hydrogen' && (
+                            <>
+                                <ShaderSlider label={t('n')} value={settings.hydrogen.n} min={1} max={10} step={1}
+                                    update={v => updateNested('hydrogen', 'n', v)} dir={dir} />
+                                <ShaderSlider label={t('l')} value={settings.hydrogen.l} min={0} max={6} step={1}
+                                    update={v => updateNested('hydrogen', 'l', v)} dir={dir} />
+                                <ShaderSlider label={t('m')} value={settings.hydrogen.m} min={-6} max={6} step={1}
+                                    update={v => updateNested('hydrogen', 'm', v)} dir={dir} />
+                                <ShaderSlider label={t('zoom')} value={settings.hydrogen.zoom} min={1} max={50} step={0.5}
+                                    update={v => updateNested('hydrogen', 'zoom', v)} dir={dir} />
+                                <ShaderSlider label={t('contrast')} value={settings.hydrogen.contrast} min={0} max={30} step={0.5}
+                                    update={v => updateNested('hydrogen', 'contrast', v)} dir={dir} />
+                                <ShaderSlider label={t('gamma')} value={settings.hydrogen.gamma} min={0.05} max={2} step={0.01}
+                                    update={v => updateNested('hydrogen', 'gamma', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.hydrogen.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('hydrogen', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.hydrogen.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('hydrogen', 'saturation', v)} dir={dir} />
+
+                                <div className="flex flex-wrap gap-6 mt-4">
+                                    {['color1', 'color2'].map((col, i) => (
+                                        <div key={col} className="flex-1 min-w-[300px] space-y-2">
+                                            <span className="text-xs uppercase text-gray-500">Color {i + 1}</span>
+                                            <ColorPicker
+                                                color={rgbArrayToHex(settings.hydrogen[col])}
+                                                onChange={h => updateNested('hydrogen', col, hexToRgbArray(h))}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+
+                        {/* NEURAL NOISE SHADER */}
+                        {settings.activeShader === 'neuralNoise' && (
+                            <>
+                                <ShaderSlider label={t('speed')} value={settings.neuralNoise.speed} min={0} max={5} step={0.1}
+                                    update={v => updateNested('neuralNoise', 'speed', v)} dir={dir} />
+                                <ShaderSlider label={t('iterations')} value={settings.neuralNoise.iterations} min={1} max={32} step={1}
+                                    update={v => updateNested('neuralNoise', 'iterations', v)} dir={dir} />
+                                <ShaderSlider label={t('complexity')} value={settings.neuralNoise.complexity} min={0} max={5} step={0.1}
+                                    update={v => updateNested('neuralNoise', 'complexity', v)} dir={dir} />
+                                <ShaderSlider label={t('distance')} value={settings.neuralNoise.distance} min={0.5} max={3} step={0.05}
+                                    update={v => updateNested('neuralNoise', 'distance', v)} dir={dir} />
+                                <ShaderSlider label={t('brightness')} value={settings.neuralNoise.brightness} min={0} max={3} step={0.1}
+                                    update={v => updateNested('neuralNoise', 'brightness', v)} dir={dir} />
+                                <ShaderSlider label={t('contrast')} value={settings.neuralNoise.contrast} min={0} max={2} step={0.05}
+                                    update={v => updateNested('neuralNoise', 'contrast', v)} dir={dir} />
+                                <ShaderSlider label={t('colorShiftSpeed')} value={settings.neuralNoise.colorShiftSpeed} min={0} max={5} step={0.1}
+                                    update={v => updateNested('neuralNoise', 'colorShiftSpeed', v)} dir={dir} />
+                                <ShaderSlider label={t('vignette')} value={settings.neuralNoise.vignette} min={0} max={3} step={0.1}
+                                    update={v => updateNested('neuralNoise', 'vignette', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.neuralNoise.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('neuralNoise', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.neuralNoise.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('neuralNoise', 'saturation', v)} dir={dir} />
+
+                                <div className="flex flex-wrap gap-6 mt-4">
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('baseColor')}</span>
+                                        <ColorPicker
+                                            color={settings.neuralNoise.color}
+                                            onChange={h => updateNested('neuralNoise', 'color', h)}
+                                        />
+                                    </div>
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('colorBack')}</span>
+                                        <ColorPicker
+                                            color={settings.neuralNoise.backgroundColor}
+                                            onChange={h => updateNested('neuralNoise', 'backgroundColor', h)}
+                                        />
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* INTERSTELLAR SHADER */}
+                        {settings.activeShader === 'interstellar' && (
+                            <>
+                                <ShaderSlider label={t('speed')} value={settings.interstellar.speed} min={0} max={5} step={0.1}
+                                    update={v => updateNested('interstellar', 'speed', v)} dir={dir} />
+                                <ShaderSlider label={t('passes')} value={settings.interstellar.passes} min={1} max={4} step={1}
+                                    update={v => updateNested('interstellar', 'passes', v)} dir={dir} />
+                                <ShaderSlider label={t('grain')} value={settings.interstellar.grain} min={0} max={0.5} step={0.01}
+                                    update={v => updateNested('interstellar', 'grain', v)} dir={dir} />
+                                <ShaderSlider label={t('luminance')} value={settings.interstellar.luminance} min={0} max={10} step={0.1}
+                                    update={v => updateNested('interstellar', 'luminance', v)} dir={dir} />
+                                <ShaderSlider label={t('stepPrecision')} value={settings.interstellar.precision} min={0.05} max={2} step={0.01}
+                                    update={v => updateNested('interstellar', 'precision', v)} dir={dir} />
+                                <ShaderSlider label={t('iterations')} value={settings.interstellar.iterations} min={1} max={100} step={0.1}
+                                    update={v => updateNested('interstellar', 'iterations', v)} dir={dir} />
+                                <ShaderSlider label={t('solidity')} value={settings.interstellar.solidity} min={0.1} max={3} step={0.05}
+                                    update={v => updateNested('interstellar', 'solidity', v)} dir={dir} />
+                                <ShaderSlider label={t('camX')} value={settings.interstellar.camX} min={-10} max={10} step={0.1}
+                                    update={v => updateNested('interstellar', 'camX', v)} dir={dir} />
+                                <ShaderSlider label={t('camY')} value={settings.interstellar.camY} min={-10} max={10} step={0.1}
+                                    update={v => updateNested('interstellar', 'camY', v)} dir={dir} />
+                                <ShaderSlider label={t('camPitch')} value={settings.interstellar.camPitch} min={-3.14} max={3.14} step={0.01}
+                                    update={v => updateNested('interstellar', 'camPitch', v)} dir={dir} />
+                                <ShaderSlider label={t('camFov')} value={settings.interstellar.camFov} min={0.5} max={5} step={0.1}
+                                    update={v => updateNested('interstellar', 'camFov', v)} dir={dir} />
+                                <ShaderSlider label={t('camShiftX')} value={settings.interstellar.camShiftX} min={-2} max={2} step={0.1}
+                                    update={v => updateNested('interstellar', 'camShiftX', v)} dir={dir} />
+                                <ShaderSlider label={t('camShiftY')} value={settings.interstellar.camShiftY} min={-2} max={2} step={0.1}
+                                    update={v => updateNested('interstellar', 'camShiftY', v)} dir={dir} />
+                            </>
+                        )}
+
+                        {/* SPACE FLOWER SHADER */}
+                        {settings.activeShader === 'spaceFlower' && (
+                            <>
+                                <ShaderSlider label={t('speed')} value={settings.spaceFlower.speed} min={0} max={5} step={0.1}
+                                    update={v => updateNested('spaceFlower', 'speed', v)} dir={dir} />
+                                <ShaderSlider label={t('bandCount')} value={settings.spaceFlower.bandCount} min={1} max={20} step={1}
+                                    update={v => updateNested('spaceFlower', 'bandCount', v)} dir={dir} />
+                                <ShaderSlider label={t('twist')} value={settings.spaceFlower.twist} min={0} max={1} step={0.01}
+                                    update={v => updateNested('spaceFlower', 'twist', v)} dir={dir} />
+                                <ShaderSlider label={t('center')} value={settings.spaceFlower.center} min={0} max={2} step={0.05}
+                                    update={v => updateNested('spaceFlower', 'center', v)} dir={dir} />
+                                <ShaderSlider label={t('proportion')} value={settings.spaceFlower.proportion} min={0} max={1} step={0.01}
+                                    update={v => updateNested('spaceFlower', 'proportion', v)} dir={dir} />
+                                <ShaderSlider label={t('softness')} value={settings.spaceFlower.softness} min={0} max={1} step={0.01}
+                                    update={v => updateNested('spaceFlower', 'softness', v)} dir={dir} />
+                                <ShaderSlider label={t('noiseStrength')} value={settings.spaceFlower.noise} min={0} max={2} step={0.05}
+                                    update={v => updateNested('spaceFlower', 'noise', v)} dir={dir} />
+                                <ShaderSlider label={t('noiseFrequency')} value={settings.spaceFlower.noiseFrequency} min={0} max={5} step={0.1}
+                                    update={v => updateNested('spaceFlower', 'noiseFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.spaceFlower.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('spaceFlower', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.spaceFlower.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('spaceFlower', 'saturation', v)} dir={dir} />
+
+                                <ToggleSwitch
+                                    checked={settings.spaceFlower.symmetry >= 0.5}
+                                    onChange={v => updateNested('spaceFlower', 'symmetry', v ? 1.0 : 0.0)}
+                                    label={t('symmetry')}
+                                    isRTL={dir === 'rtl'}
+                                />
+
+                                <div className="space-y-2 mt-4">
+                                    <span className="text-xs uppercase text-gray-500">{t('colorBack')}</span>
+                                    <ColorPicker
+                                        color={settings.spaceFlower.colorBack}
+                                        onChange={h => updateNested('spaceFlower', 'colorBack', h)}
+                                    />
+                                </div>
+
+                                {/* COLOR COUNT SLIDER (Adjusts number of colors from 2 to 10) */}
+                                <ShaderSlider
+                                    label={t('colorCount')}
+                                    value={settings.spaceFlower.colorCount}
+                                    min={2}
+                                    max={10}
+                                    step={1}
+                                    update={v => updateNested('spaceFlower', 'colorCount', v)}
+                                    dir={dir}
+                                />
+
+                                <div className="mt-4 space-y-4">
+                                    <span className="text-xs uppercase text-gray-500 block">
+                                        {t('swirlColors')}
+                                    </span>
+                                    <div className="flex flex-col space-y-3">
+                                        {[
+                                            'firstColor',
+                                            'secondColor',
+                                            'thirdColor',
+                                            'fourthColor',
+                                            'fifthColor',
+                                            'sixthColor',
+                                            'seventhColor',
+                                            'eighthColor',
+                                            'ninthColor',
+                                            'tenthColor',
+                                        ].map((translationKey, i) => {
+                                            if (i >= settings.spaceFlower.colorCount) return null;
+
+                                            return (
+                                                <div key={translationKey} className="w-full space-y-1 p-2 bg-white/5 rounded">
+                                                    <span className="text-[10px] uppercase text-gray-400 block">{t(translationKey)}</span>
+                                                    <ColorPicker
+                                                        color={settings.spaceFlower.colors[i]}
+                                                        onChange={h => {
+                                                            const newColors = [...settings.spaceFlower.colors];
+                                                            newColors[i] = h;
+                                                            updateNested('spaceFlower', 'colors', newColors);
+                                                        }}
+                                                    />
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* ELECTRIC SPIRAL SHADER */}
+                        {settings.activeShader === 'electricSpiral' && (
+                            <>
+                                <ShaderSlider label={t('speed')} value={settings.electricSpiral.speed} min={0} max={5} step={0.1}
+                                    update={v => updateNested('electricSpiral', 'speed', v)} dir={dir} />
+                                <ShaderSlider label={t('gridScale')} value={settings.electricSpiral.gridScale} min={0.5} max={20} step={0.1}
+                                    update={v => updateNested('electricSpiral', 'gridScale', v)} dir={dir} />
+                                <ShaderSlider label={t('gridSoftness')} value={settings.electricSpiral.gridSoftness} min={0} max={20} step={0.1}
+                                    update={v => updateNested('electricSpiral', 'gridSoftness', v)} dir={dir} />
+                                <ShaderSlider label={t('spiralFrequency')} value={settings.electricSpiral.spiralFrequency} min={0} max={30} step={0.1}
+                                    update={v => updateNested('electricSpiral', 'spiralFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('spiralTightness')} value={settings.electricSpiral.spiralTightness} min={0} max={30} step={0.1}
+                                    update={v => updateNested('electricSpiral', 'spiralTightness', v)} dir={dir} />
+                                <ShaderSlider label={t('glowIntensity')} value={settings.electricSpiral.glowIntensity} min={0} max={3} step={0.05}
+                                    update={v => updateNested('electricSpiral', 'glowIntensity', v)} dir={dir} />
+                                <ShaderSlider label={t('coreBrightness')} value={settings.electricSpiral.coreBrightness} min={-10} max={0} step={0.1}
+                                    update={v => updateNested('electricSpiral', 'coreBrightness', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.electricSpiral.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('electricSpiral', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.electricSpiral.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('electricSpiral', 'saturation', v)} dir={dir} />
+
+                                <div className="flex flex-wrap gap-6 mt-4">
+                                    {[
+                                        { key: 'colorGrid', label: t('colorGrid') },
+                                        { key: 'colorGlow', label: t('colorGlow') },
+                                        { key: 'colorSpiral', label: t('colorSpiral') },
+                                    ].map(({ key, label }) => (
+                                        <div key={key} className="flex-1 min-w-[300px] space-y-2">
+                                            <span className="text-xs uppercase text-gray-500">{label}</span>
+                                            <ColorPicker
+                                                color={settings.electricSpiral[key]}
+                                                onChange={h => updateNested('electricSpiral', key, h)}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+
+                        {/* VORONOI SHADER */}
+                        {settings.activeShader === 'voronoi' && (
+                            <>
+                                <ShaderSlider label={t('speed')} value={settings.voronoi.speed} min={0} max={5} step={0.1}
+                                    update={v => updateNested('voronoi', 'speed', v)} dir={dir} />
+                                <ShaderSlider label={t('scale')} value={settings.voronoi.scale} min={1} max={40} step={0.5}
+                                    update={v => updateNested('voronoi', 'scale', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.voronoi.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('voronoi', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.voronoi.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('voronoi', 'saturation', v)} dir={dir} />
                             </>
                         )}
                         </div>
