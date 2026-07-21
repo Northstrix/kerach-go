@@ -49,16 +49,20 @@ The app is fully localized into:
 [framer-motion](https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js)
 
 [chroma-js](https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.4.2/chroma.min.js)
-    
+
 [lucide](https://unpkg.com/lucide@latest)
 
 [radix-ui](https://www.npmjs.com/package/radix-ui)
+
+[Anthropic's Claude Sonnet 5](https://claude.ai)
 
 [Google Gemini](https://gemini.google.com/)
 
 [Input Floating Label animation](https://codepen.io/Mahe76/pen/qBQgXyK) by [Elpeeda](https://codepen.io/Mahe76)
 
 [GradientGen](https://github.com/noegarsoux/GradientGen) by [noegarsoux](https://github.com/noegarsoux)
+
+[Velustro](https://uvcanvas.com/docs/components/velustro) by [UVCanvas](https://uvcanvas.com/)
 
 [Balatro Background Shaders](https://www.shadertoy.com/view/XXtBRr) by [xxidbr9](https://www.shadertoy.com/user/xxidbr9)
 
@@ -68,6 +72,26 @@ The app is fully localized into:
 
 [Unnamed Luminous Material](https://x.com/gibkun1/status/2013734035454042547) by [タツキ｜サムネ顧問](https://x.com/gibkun1)
 
+[Tranquiluxe](https://uvcanvas.com/docs/components/tranquiluxe) by [UVCanvas](https://uvcanvas.com/)
+
 [swirl](https://shaders.paper.design/swirl) by [Paper Shaders](https://shaders.paper.design/)
 
+[Highway to Heaven](https://codepen.io/sabosugi/pen/azpqWKE) by [Sabo Sugi](https://codepen.io/sabosugi)
+
+[Hall of Fractals](https://codepen.io/sabosugi/pen/gbgeXja) by [Sabo Sugi](https://codepen.io/sabosugi)
+
 [shaders](https://github.com/paper-design/shaders) by [paper design](https://github.com/paper-design)
+
+[Shader Art Coding Introduction](https://www.shadertoy.com/view/mtyGWy) by [kishimisu](https://www.shadertoy.com/user/kishimisu)
+
+[流尾4](https://www.shadertoy.com/view/tXSBD1) by [yufengjie](https://www.shadertoy.com/user/yufengjie)
+
+[Kaleidoscope Beam](https://www.shadertoy.com/view/t3SfW1) by [jshguo](https://www.shadertoy.com/user/jshguo)
+
+[Neuro Noise (GLSL Shader)](https://codepen.io/ksenia-k/pen/vYwgrWv) by [Ksenia Kondrashova](https://codepen.io/ksenia-k)
+
+[Fork B of - A space flower](https://www.shadertoy.com/view/tfBXzD) by [bennoH](https://www.shadertoy.com/user/bennoH)
+
+[Golden Electric Spiral](https://www.shadertoy.com/view/csj3zt) by [SnoopethDuckDuck](https://www.shadertoy.com/user/SnoopethDuckDuck)
+
+[Voronoi - distances](https://www.shadertoy.com/view/ldl3W8) by [iq](https://www.shadertoy.com/user/iq)
