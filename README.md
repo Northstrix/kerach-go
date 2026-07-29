@@ -94,4 +94,6 @@ The app is fully localized into:
 
 [Golden Electric Spiral](https://www.shadertoy.com/view/csj3zt) by [SnoopethDuckDuck](https://www.shadertoy.com/user/SnoopethDuckDuck)
 
-[Voronoi - distances](https://www.shadertoy.com/view/ldl3W8) by [iq](https://www.shadertoy.com/user/iq)
+[Abstract Chromatic Light](https://codepen.io/editor/sabosugi/pen/019fa4fd-6341-7983-b8f4-81dff70f7e62) by [Sabo Sugi](https://codepen.io/sabosugi)
+
+[Enter to Other Dimension](https://codepen.io/editor/sabosugi/pen/019fa3cf-2f37-771c-8735-81f31d1e7e0e) by [Sabo Sugi](https://codepen.io/sabosugi)

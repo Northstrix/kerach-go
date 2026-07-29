@@ -1678,6 +1678,294 @@
         }
         `;
 
+        const chromaticLightFragShader = `precision highp float;
+        precision highp int;
+
+        uniform vec2 uResolution;
+        uniform float uTime;
+
+        uniform int uTraceSteps;
+        uniform int uWarpSteps;
+
+        uniform float uInitialDepth;
+        uniform float uBaseStep;
+        uniform float uDepthTarget;
+        uniform float uDepthBlend;
+        uniform float uInverseStepDivisor;
+
+        uniform float uWarpSpatialScale;
+        uniform float uWarpAmplitude;
+        uniform float uWarpTurnSmoothing;
+        uniform float uFieldSmoothness;
+
+        uniform float uColorFrequency;
+        uniform float uInverseExposure;
+
+        uniform vec3 uFractalColor;
+        uniform vec3 uBackgroundColor;
+
+        vec3 safeNormalize(vec3 value) {
+            return value * inversesqrt(max(dot(value, value), 1e-8));
+        }
+
+        float smoothAbsolute(float value, float radius) {
+            return sqrt(value * value + radius * radius);
+        }
+
+        vec3 createViewRay(vec2 fragCoord) {
+            vec2 uv = (fragCoord * 2.0 - uResolution) / max(uResolution.y, 1.0);
+            return safeNormalize(vec3(-uv, 1.0));
+        }
+
+        vec3 evaluateFractalWarp(vec3 position) {
+            float frequency = 3.4;
+
+            for (int warpIndex = 0; warpIndex < 12; ++warpIndex) {
+                if (warpIndex >= uWarpSteps) break;
+
+                frequency *= 0.625;
+
+                float spatialFrequency = frequency * uWarpSpatialScale;
+                float phaseOffset = frequency + uTime;
+                vec3 phase = position * spatialFrequency + phaseOffset;
+                float inverseFrequency = 1.0 / max(frequency, 1e-4);
+                vec3 displacement = sin(phase) * (uWarpAmplitude * inverseFrequency);
+
+                position = mix(position.zxy, position, uWarpTurnSmoothing) + displacement;
+            }
+
+            return position;
+        }
+
+        float calculateRayStep(float rayDepth, float warpedDepth) {
+            float mixedDepth = mix(rayDepth, warpedDepth, uDepthBlend);
+            float fieldDifference = smoothAbsolute(uDepthTarget - mixedDepth, uFieldSmoothness);
+            return uBaseStep + fieldDifference * uInverseStepDivisor;
+        }
+
+        vec3 tanhSafe(vec3 x) {
+            vec3 clamped = clamp(x, vec3(-15.0), vec3(15.0));
+            vec3 e2 = exp(2.0 * clamped);
+            return (e2 - 1.0) / (e2 + 1.0);
+        }
+
+        void main() {
+            vec3 rayDirection = createViewRay(gl_FragCoord.xy);
+            float rayDepth = uInitialDepth;
+            vec3 accumulatedLight = vec3(0.0);
+            const vec3 channelOffsets = vec3(0.0, 1.0, 2.0);
+
+            for (int traceIndex = 0; traceIndex < 200; ++traceIndex) {
+                if (traceIndex >= uTraceSteps) break;
+
+                vec3 rayPosition = rayDirection * rayDepth;
+                vec3 warpedPosition = evaluateFractalWarp(rayPosition);
+                float rayStep = calculateRayStep(rayDepth, warpedPosition.z);
+
+                rayDepth += rayStep;
+
+                float colorPhase = rayDepth + float(traceIndex) * uColorFrequency;
+                vec3 chromaticLight = sin(colorPhase + channelOffsets) + 1.0;
+
+                accumulatedLight += chromaticLight / max(rayStep, 1e-6);
+            }
+
+            vec3 originalFractalColor = tanhSafe(accumulatedLight * uInverseExposure);
+            vec3 tintedFractalColor = originalFractalColor * uFractalColor;
+
+            float fractalMask = clamp(
+                max(tintedFractalColor.r, max(tintedFractalColor.g, tintedFractalColor.b)),
+                0.0,
+                1.0
+            );
+
+            vec3 finalColor = uBackgroundColor + tintedFractalColor * fractalMask;
+
+            gl_FragColor = vec4(max(finalColor, vec3(0.0)), 1.0);
+        }
+        `;
+
+        const chromaticLightPresets = [
+            {
+                name: 'Preset 1',
+                values: {
+                    speed: 0.2, traceSteps: 114, warpSteps: 6,
+                    initialDepth: 6.1, baseStep: 0.001, depthTarget: 3.8, depthBlend: 0.5, stepDivisor: 11.6,
+                    warpSpatialScale: 0.86, warpAmplitude: 1.1, warpTurnSmoothing: -0.02,
+                    fieldSmoothness: 0.01,
+                    colorFrequency: 0.15, exposure: 30000,
+                    fractalColor: '#ffffff', backgroundColor: '#000000',
+                },
+            },
+            {
+                name: 'Preset 2',
+                values: {
+                    speed: 0.312, traceSteps: 114, warpSteps: 6,
+                    initialDepth: 0.1, baseStep: 0.0017, depthTarget: 3.8, depthBlend: 0.5, stepDivisor: 11.6,
+                    warpSpatialScale: 0.786, warpAmplitude: 1.414, warpTurnSmoothing: -0.02,
+                    fieldSmoothness: 0.01,
+                    colorFrequency: 0.017, exposure: 25770,
+                    fractalColor: '#ffffff', backgroundColor: '#28a3d7',
+                },
+            },
+        ];
+
+        const haloFragShader = `precision highp float;
+        precision highp int;
+
+        uniform vec2 uResolution;
+        uniform float uTime;
+
+        uniform float uInitialDepth;
+        uniform float uSafeMinimum;
+
+        uniform float uFieldTimeRate;
+        uniform float uForwardTravelRate;
+
+        uniform float uDomainStrength;
+        uniform float uDomainScale;
+        uniform float uDomainAttenuation;
+
+        uniform float uCameraFocalLength;
+
+        uniform float uFieldSlope;
+        uniform float uFieldDetailScale;
+
+        uniform float uDistanceBase;
+        uniform float uDistanceDepthFactor;
+
+        uniform float uExposureScale;
+
+        uniform vec3 uBackgroundColor;
+
+        const int TRACE_STEP_COUNT = 50;
+        const int TRACE_START_INDEX = 30;
+        const int DOMAIN_LAYER_COUNT = 3;
+
+        vec2 getScreenCoordinates(vec2 fragCoord) {
+            vec2 viewport = max(uResolution, vec2(1.0));
+            return (2.0 * fragCoord - viewport) / viewport.y;
+        }
+
+        vec3 getViewRay(vec2 screenPosition) {
+            return normalize(vec3(screenPosition, uCameraFocalLength));
+        }
+
+        vec3 deformDomain(vec3 samplePosition, float depth, float timeValue, float tracePhase) {
+            vec3 warpedPosition = samplePosition;
+
+            for (int layerIndex = 0; layerIndex < DOMAIN_LAYER_COUNT; ++layerIndex) {
+                float octave = float(layerIndex + 2);
+                float frequency = octave * uDomainScale;
+                float attenuation = octave + uDomainAttenuation;
+
+                vec3 phase = warpedPosition.yzx * frequency - depth + timeValue + tracePhase;
+
+                warpedPosition += sin(phase) * (uDomainStrength / attenuation);
+            }
+
+            return warpedPosition;
+        }
+
+        float evaluateFieldDistance(vec3 warpedPosition, float localDepth, float rayDepth) {
+            float primaryShape = abs(warpedPosition.y + localDepth * uFieldSlope);
+            vec3 secondaryShape = sin(warpedPosition - rayDepth) / uFieldDetailScale;
+            vec4 fieldVector = vec4(primaryShape, secondaryShape);
+            float depthNormalization = uDistanceBase + rayDepth * rayDepth * uDistanceDepthFactor;
+
+            return max(length(fieldVector) / depthNormalization, uSafeMinimum);
+        }
+
+        vec3 getTracePalette(float tracePhase) {
+            return 0.9 + sin(tracePhase * 1.3 - vec3(4.8, -0.4, 1.2));
+        }
+
+        vec3 accumulateLight(vec3 palette, float fieldDistance, float rayDepth) {
+            float safeDepth = max(rayDepth, uInitialDepth);
+            float densityDenominator = max(fieldDistance * fieldDistance * safeDepth, uSafeMinimum);
+            vec3 concentratedLight = palette / densityDenominator;
+            vec3 depthGlow = fieldDistance * rayDepth / vec3(1.000, 0.812, 0.600);
+
+            return concentratedLight + depthGlow;
+        }
+
+        vec3 applyToneMapping(vec3 hdrColor) {
+            vec3 value = clamp(hdrColor / uExposureScale, vec3(-10.0), vec3(10.0));
+            vec3 exponentialValue = exp(2.0 * value);
+            vec3 mappedColor = (exponentialValue - 1.0) / max(exponentialValue + 1.0, vec3(uSafeMinimum));
+
+            return clamp(mappedColor, 0.0, 1.0);
+        }
+
+        void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+            vec2 screenPosition = getScreenCoordinates(fragCoord);
+            vec3 rayDirection = getViewRay(screenPosition);
+
+            float fieldTime = uTime * uFieldTimeRate;
+            float cameraTravel = uTime * uForwardTravelRate;
+
+            float rayDepth = uInitialDepth;
+            vec3 accumulatedColor = vec3(0.0);
+
+            for (int traceIndex = TRACE_START_INDEX; traceIndex < TRACE_STEP_COUNT; ++traceIndex) {
+                float tracePhase = float(traceIndex) + 13.0;
+
+                vec3 rayPosition = rayDirection * rayDepth;
+                vec3 travelingPosition = rayPosition;
+                travelingPosition.z += cameraTravel;
+
+                vec3 warpedPosition = deformDomain(travelingPosition, rayDepth, fieldTime, tracePhase);
+                float localDepth = warpedPosition.z - cameraTravel;
+                float fieldDistance = evaluateFieldDistance(warpedPosition, localDepth, rayDepth);
+                vec3 palette = getTracePalette(tracePhase);
+
+                accumulatedColor += accumulateLight(palette, fieldDistance, rayDepth);
+
+                rayDepth += fieldDistance;
+            }
+
+            vec3 finalColor = applyToneMapping(accumulatedColor);
+
+            float glowMask = clamp(max(finalColor.r, max(finalColor.g, finalColor.b)), 0.0, 1.0);
+            finalColor = mix(uBackgroundColor, finalColor, glowMask);
+
+            fragColor = vec4(finalColor, 1.0);
+        }
+
+        void main() {
+            mainImage(gl_FragColor, gl_FragCoord.xy);
+        }
+        `;
+
+        const haloPresets = [
+            {
+                name: 'Preset 1',
+                values: {
+                    initialDepth: 1.46, safeMinimum: 0.0001,
+                    fieldTimeRate: 0.10, forwardTravelRate: 0.23,
+                    domainStrength: 1.69, domainScale: 3.84, domainAttenuation: 3.86,
+                    cameraFocalLength: 0.22,
+                    fieldSlope: -0.10, fieldDetailScale: 4.60,
+                    distanceBase: 2.60, distanceDepthFactor: 0.45,
+                    exposureScale: 2000.0,
+                    backgroundColor: '#000000',
+                },
+            },
+            {
+                name: 'Preset 2',
+                values: {
+                    initialDepth: 3.044, safeMinimum: 0.000001,
+                    fieldTimeRate: 0.10, forwardTravelRate: 0.351,
+                    domainStrength: 2.652, domainScale: 3.362, domainAttenuation: 3.194,
+                    cameraFocalLength: 0.321,
+                    fieldSlope: -0.459, fieldDetailScale: 2.276,
+                    distanceBase: 2.322, distanceDepthFactor: 0.515,
+                    exposureScale: 1673.0,
+                    backgroundColor: '#000000',
+                },
+            },
+        ];
+
         // =========================================================================
         // LOCALIZATION
         // =========================================================================
@@ -1754,6 +2042,19 @@
                 colorBack: "Background Color", colorGrid: "Grid Color", colorGlow: "Glow Color", colorSpiral: "Spiral Color",
                 eighthColor: "Eighth Color", ninthColor: "Ninth Color", tenthColor: "Tenth Color",
                 voronoi: "Voronoi",
+                chromaticLight: "Chromatic Light", halo: "Halo",
+                traceSteps: "Trace Steps", warpSteps: "Warp Steps",
+                initialDepth: "Initial Depth", baseStep: "Base Step", depthTarget: "Depth Target",
+                depthBlend: "Depth Blend", stepDivisor: "Step Divisor",
+                warpSpatialScale: "Warp Spatial Scale", warpAmplitude: "Warp Amplitude",
+                warpTurnSmoothing: "Warp Turn Smoothing", fieldSmoothness: "Field Smoothness",
+                colorFrequency: "Color Frequency", exposure: "Exposure", fractalColor: "Fractal Color",
+                fieldTimeRate: "Field Time Rate", forwardTravelRate: "Forward Travel Rate",
+                cameraFocalLength: "Camera Focal Length",
+                domainStrength: "Domain Strength", domainScale: "Domain Scale", domainAttenuation: "Domain Attenuation",
+                fieldSlope: "Field Slope", fieldDetailScale: "Field Detail Scale",
+                distanceBase: "Distance Base", distanceDepthFactor: "Distance Depth Factor",
+                safeMinimum: "Safe Minimum", exposureScale: "Exposure Scale",
             },
             he: {
                 appName: "קרח Go",
@@ -1824,6 +2125,19 @@
                 colorBack: "צבע רקע", colorGrid: "צבע רשת", colorGlow: "צבע זוהר", colorSpiral: "צבע ספירלה",
                 eighthColor: "צבע שמיני", ninthColor: "צבע תשיעי", tenthColor: "צבע עשירי",
                 voronoi: "וורונוי",
+                chromaticLight: "אור כרומטי", halo: "הילה",
+                traceSteps: "צעדי מעקב", warpSteps: "צעדי עיוות",
+                initialDepth: "עומק התחלתי", baseStep: "צעד בסיס", depthTarget: "עומק יעד",
+                depthBlend: "מיזוג עומק", stepDivisor: "מחלק צעד",
+                warpSpatialScale: "קנה מידה מרחבי", warpAmplitude: "משרעת עיוות",
+                warpTurnSmoothing: "החלקת סיבוב", fieldSmoothness: "חלקות שדה",
+                colorFrequency: "תדירות צבע", exposure: "חשיפה", fractalColor: "צבע פרקטל",
+                fieldTimeRate: "קצב זמן שדה", forwardTravelRate: "קצב תנועה קדימה",
+                cameraFocalLength: "אורך מוקד מצלמה",
+                domainStrength: "עוצמת תחום", domainScale: "קנה מידת תחום", domainAttenuation: "החלשת תחום",
+                fieldSlope: "שיפוע שדה", fieldDetailScale: "קנה מידת פירוט שדה",
+                distanceBase: "בסיס מרחק", distanceDepthFactor: "מקדם עומק מרחק",
+                safeMinimum: "מינימום בטוח", exposureScale: "קנה מידת חשיפה",
             },
             it: {
                 appName: "Kerach Go",
@@ -1894,6 +2208,19 @@
                 colorBack: "Colore Sfondo", colorGrid: "Colore Griglia", colorGlow: "Colore Bagliore", colorSpiral: "Colore Spirale",
                 eighthColor: "Ottavo Colore", ninthColor: "Nono Colore", tenthColor: "Decimo Colore",
                 voronoi: "Voronoi",
+                chromaticLight: "Luce Cromatica", halo: "Alone",
+                traceSteps: "Passi di Tracciamento", warpSteps: "Passi di Distorsione",
+                initialDepth: "Profondità Iniziale", baseStep: "Passo Base", depthTarget: "Profondità Target",
+                depthBlend: "Fusione Profondità", stepDivisor: "Divisore Passo",
+                warpSpatialScale: "Scala Spaziale Distorsione", warpAmplitude: "Ampiezza Distorsione",
+                warpTurnSmoothing: "Levigatura Rotazione", fieldSmoothness: "Levigatura Campo",
+                colorFrequency: "Frequenza Colore", exposure: "Esposizione", fractalColor: "Colore Frattale",
+                fieldTimeRate: "Velocità Tempo Campo", forwardTravelRate: "Velocità Avanzamento",
+                cameraFocalLength: "Lunghezza Focale Camera",
+                domainStrength: "Intensità Dominio", domainScale: "Scala Dominio", domainAttenuation: "Attenuazione Dominio",
+                fieldSlope: "Pendenza Campo", fieldDetailScale: "Scala Dettaglio Campo",
+                distanceBase: "Base Distanza", distanceDepthFactor: "Fattore Profondità Distanza",
+                safeMinimum: "Minimo di Sicurezza", exposureScale: "Scala Esposizione",
             },
             es: {
                 appName: "Kerach Go",
@@ -1964,6 +2291,19 @@
                 colorBack: "Color de Fondo", colorGrid: "Color de Cuadrícula", colorGlow: "Color de Brillo", colorSpiral: "Color de Espiral",
                 eighthColor: "Octavo Color", ninthColor: "Noveno Color", tenthColor: "Décimo Color",
                 voronoi: "Voronoi",
+                chromaticLight: "Luz Cromática", halo: "Halo",
+                traceSteps: "Pasos de Trazado", warpSteps: "Pasos de Distorsión",
+                initialDepth: "Profundidad Inicial", baseStep: "Paso Base", depthTarget: "Profundidad Objetivo",
+                depthBlend: "Mezcla de Profundidad", stepDivisor: "Divisor de Paso",
+                warpSpatialScale: "Escala Espacial de Distorsión", warpAmplitude: "Amplitud de Distorsión",
+                warpTurnSmoothing: "Suavizado de Giro", fieldSmoothness: "Suavidad de Campo",
+                colorFrequency: "Frecuencia de Color", exposure: "Exposición", fractalColor: "Color del Fractal",
+                fieldTimeRate: "Velocidad de Tiempo del Campo", forwardTravelRate: "Velocidad de Avance",
+                cameraFocalLength: "Distancia Focal de Cámara",
+                domainStrength: "Intensidad de Dominio", domainScale: "Escala de Dominio", domainAttenuation: "Atenuación de Dominio",
+                fieldSlope: "Pendiente de Campo", fieldDetailScale: "Escala de Detalle de Campo",
+                distanceBase: "Base de Distancia", distanceDepthFactor: "Factor de Profundidad de Distancia",
+                safeMinimum: "Mínimo Seguro", exposureScale: "Escala de Exposición",
             },
             pt: {
                 appName: "Kerach Go",
@@ -2034,6 +2374,19 @@
                 colorBack: "Cor de Fundo", colorGrid: "Cor da Grade", colorGlow: "Cor do Brilho", colorSpiral: "Cor da Espiral",
                 eighthColor: "Oitava Cor", ninthColor: "Nona Cor", tenthColor: "Décima Cor",
                 voronoi: "Voronoi",
+                chromaticLight: "Luz Cromática", halo: "Halo",
+                traceSteps: "Passos de Traçado", warpSteps: "Passos de Distorção",
+                initialDepth: "Profundidade Inicial", baseStep: "Passo Base", depthTarget: "Profundidade Alvo",
+                depthBlend: "Mescla de Profundidade", stepDivisor: "Divisor de Passo",
+                warpSpatialScale: "Escala Espacial de Distorção", warpAmplitude: "Amplitude de Distorção",
+                warpTurnSmoothing: "Suavização de Giro", fieldSmoothness: "Suavidade de Campo",
+                colorFrequency: "Frequência de Cor", exposure: "Exposição", fractalColor: "Cor do Fractal",
+                fieldTimeRate: "Taxa de Tempo do Campo", forwardTravelRate: "Taxa de Avanço",
+                cameraFocalLength: "Distância Focal da Câmera",
+                domainStrength: "Intensidade do Domínio", domainScale: "Escala do Domínio", domainAttenuation: "Atenuação do Domínio",
+                fieldSlope: "Inclinação do Campo", fieldDetailScale: "Escala de Detalhe do Campo",
+                distanceBase: "Base de Distância", distanceDepthFactor: "Fator de Profundidade da Distância",
+                safeMinimum: "Mínimo Seguro", exposureScale: "Escala de Exposição",
             },
             ja: {
                 appName: "Kerach Go", controls: "コントロール", shader: "シェーダー", palette: "パレット", mix: "ミックス",
@@ -2102,6 +2455,19 @@
                 colorBack: "背景色", colorGrid: "グリッドの色", colorGlow: "グローの色", colorSpiral: "スパイラルの色",
                 eighthColor: "8番目の色", ninthColor: "9番目の色", tenthColor: "10番目の色",
                 voronoi: "ボロノイ",
+                chromaticLight: "クロマティックライト", halo: "ハロー",
+                traceSteps: "トレースステップ", warpSteps: "ワープステップ",
+                initialDepth: "初期深度", baseStep: "ベースステップ", depthTarget: "目標深度",
+                depthBlend: "深度ブレンド", stepDivisor: "ステップ除数",
+                warpSpatialScale: "ワープ空間スケール", warpAmplitude: "ワープ振幅",
+                warpTurnSmoothing: "回転の滑らかさ", fieldSmoothness: "フィールドの滑らかさ",
+                colorFrequency: "色の周波数", exposure: "露出", fractalColor: "フラクタルの色",
+                fieldTimeRate: "フィールド時間レート", forwardTravelRate: "前進速度",
+                cameraFocalLength: "カメラ焦点距離",
+                domainStrength: "ドメイン強度", domainScale: "ドメインスケール", domainAttenuation: "ドメイン減衰",
+                fieldSlope: "フィールド傾斜", fieldDetailScale: "フィールド詳細スケール",
+                distanceBase: "距離ベース", distanceDepthFactor: "距離深度係数",
+                safeMinimum: "安全最小値", exposureScale: "露出スケール",
             },
             yue: {
                 appName: "Kerach Go", controls: "控制", shader: "着色器", palette: "調色盤", mix: "混合",
@@ -2168,6 +2534,19 @@
                 colorBack: "背景顏色", colorGrid: "網格顏色", colorGlow: "光暈顏色", colorSpiral: "螺旋顏色",
                 eighthColor: "第八種顏色", ninthColor: "第九種顏色", tenthColor: "第十種顏色",
                 voronoi: "沃羅諾伊",
+                chromaticLight: "色彩光", halo: "光環",
+                traceSteps: "追蹤步數", warpSteps: "扭曲步數",
+                initialDepth: "初始深度", baseStep: "基礎步進", depthTarget: "目標深度",
+                depthBlend: "深度混合", stepDivisor: "步進除數",
+                warpSpatialScale: "扭曲空間比例", warpAmplitude: "扭曲振幅",
+                warpTurnSmoothing: "轉向平滑度", fieldSmoothness: "場平滑度",
+                colorFrequency: "顏色頻率", exposure: "曝光", fractalColor: "碎形顏色",
+                fieldTimeRate: "場時間速率", forwardTravelRate: "前進速率",
+                cameraFocalLength: "相機焦距",
+                domainStrength: "域強度", domainScale: "域比例", domainAttenuation: "域衰減",
+                fieldSlope: "場斜率", fieldDetailScale: "場細節比例",
+                distanceBase: "距離基數", distanceDepthFactor: "距離深度係數",
+                safeMinimum: "安全最小值", exposureScale: "曝光比例",
             }
         };
 
@@ -2810,6 +3189,8 @@
 [Fork B of - A space flower](https://www.shadertoy.com/view/tfBXzD) by [bennoH](https://www.shadertoy.com/user/bennoH)
 [Golden Electric Spiral](https://www.shadertoy.com/view/csj3zt) by [SnoopethDuckDuck](https://www.shadertoy.com/user/SnoopethDuckDuck)
 [Voronoi - distances](https://www.shadertoy.com/view/ldl3W8) by [iq](https://www.shadertoy.com/user/iq)
+[Abstract Chromatic Light](https://codepen.io/editor/sabosugi/pen/019fa4fd-6341-7983-b8f4-81dff70f7e62) by [Sabo Sugi](https://codepen.io/sabosugi)
+[Enter to Other Dimension](https://codepen.io/editor/sabosugi/pen/019fa3cf-2f37-771c-8735-81f31d1e7e0e) by [Sabo Sugi](https://codepen.io/sabosugi)
         `;
 
         function CreditHighlightHover({ children, href, className }) {
@@ -3478,6 +3859,43 @@
                         uSaturation: { value: 1.0 },
                         iChannel0: { value: noiseTexture },
                     });
+                } else if (type === 'chromaticLight') {
+                    baseFragment = chromaticLightFragShader;
+                    Object.assign(uniforms, {
+                        uTraceSteps: { value: 114 },
+                        uWarpSteps: { value: 6 },
+                        uInitialDepth: { value: 6.1 },
+                        uBaseStep: { value: 0.001 },
+                        uDepthTarget: { value: 3.8 },
+                        uDepthBlend: { value: 0.5 },
+                        uInverseStepDivisor: { value: 1 / 11.6 },
+                        uWarpSpatialScale: { value: 0.86 },
+                        uWarpAmplitude: { value: 1.1 },
+                        uWarpTurnSmoothing: { value: -0.02 },
+                        uFieldSmoothness: { value: 0.01 },
+                        uColorFrequency: { value: 0.15 },
+                        uInverseExposure: { value: 1 / 30000 },
+                        uFractalColor: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
+                        uBackgroundColor: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
+                    });
+                } else if (type === 'halo') {
+                    baseFragment = haloFragShader;
+                    Object.assign(uniforms, {
+                        uInitialDepth: { value: 1.46 },
+                        uSafeMinimum: { value: 0.0001 },
+                        uFieldTimeRate: { value: 0.10 },
+                        uForwardTravelRate: { value: 0.23 },
+                        uDomainStrength: { value: 1.69 },
+                        uDomainScale: { value: 3.84 },
+                        uDomainAttenuation: { value: 3.86 },
+                        uCameraFocalLength: { value: 0.22 },
+                        uFieldSlope: { value: -0.10 },
+                        uFieldDetailScale: { value: 4.60 },
+                        uDistanceBase: { value: 2.60 },
+                        uDistanceDepthFactor: { value: 0.45 },
+                        uExposureScale: { value: 2000.0 },
+                        uBackgroundColor: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
+                    });
                 } else {
                     baseFragment = meltFragShader;
                     Object.assign(uniforms, {
@@ -3817,6 +4235,42 @@
                             mat.uniforms.uScale.value = cur.voronoi.scale;
                             mat.uniforms.uHue.value = cur.voronoi.hue;
                             mat.uniforms.uSaturation.value = cur.voronoi.saturation;
+                        } else if (cur.activeShader === 'chromaticLight') {
+                            // External pre-multiply (like balatro): uTime = elapsed*speed.
+                            mat.uniforms.uTime.value = elapsed * cur.chromaticLight.speed;
+                            mat.uniforms.uTraceSteps.value = Math.round(cur.chromaticLight.traceSteps);
+                            mat.uniforms.uWarpSteps.value = Math.round(cur.chromaticLight.warpSteps);
+                            mat.uniforms.uInitialDepth.value = cur.chromaticLight.initialDepth;
+                            mat.uniforms.uBaseStep.value = cur.chromaticLight.baseStep;
+                            mat.uniforms.uDepthTarget.value = cur.chromaticLight.depthTarget;
+                            mat.uniforms.uDepthBlend.value = cur.chromaticLight.depthBlend;
+                            mat.uniforms.uInverseStepDivisor.value = 1 / Math.max(cur.chromaticLight.stepDivisor, 1e-6);
+                            mat.uniforms.uWarpSpatialScale.value = cur.chromaticLight.warpSpatialScale;
+                            mat.uniforms.uWarpAmplitude.value = cur.chromaticLight.warpAmplitude;
+                            mat.uniforms.uWarpTurnSmoothing.value = cur.chromaticLight.warpTurnSmoothing;
+                            mat.uniforms.uFieldSmoothness.value = cur.chromaticLight.fieldSmoothness;
+                            mat.uniforms.uColorFrequency.value = cur.chromaticLight.colorFrequency;
+                            mat.uniforms.uInverseExposure.value = 1 / Math.max(cur.chromaticLight.exposure, 1);
+                            mat.uniforms.uFractalColor.value.set(...cur.chromaticLight.fractalColor);
+                            mat.uniforms.uBackgroundColor.value.set(...cur.chromaticLight.backgroundColor);
+                        } else if (cur.activeShader === 'halo') {
+                            // fieldTimeRate & forwardTravelRate are its own two independent
+                            // rate multipliers of raw elapsed time, so no separate speed uniform.
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uInitialDepth.value = cur.halo.initialDepth;
+                            mat.uniforms.uSafeMinimum.value = cur.halo.safeMinimum;
+                            mat.uniforms.uFieldTimeRate.value = cur.halo.fieldTimeRate;
+                            mat.uniforms.uForwardTravelRate.value = cur.halo.forwardTravelRate;
+                            mat.uniforms.uDomainStrength.value = cur.halo.domainStrength;
+                            mat.uniforms.uDomainScale.value = cur.halo.domainScale;
+                            mat.uniforms.uDomainAttenuation.value = cur.halo.domainAttenuation;
+                            mat.uniforms.uCameraFocalLength.value = cur.halo.cameraFocalLength;
+                            mat.uniforms.uFieldSlope.value = cur.halo.fieldSlope;
+                            mat.uniforms.uFieldDetailScale.value = cur.halo.fieldDetailScale;
+                            mat.uniforms.uDistanceBase.value = cur.halo.distanceBase;
+                            mat.uniforms.uDistanceDepthFactor.value = cur.halo.distanceDepthFactor;
+                            mat.uniforms.uExposureScale.value = cur.halo.exposureScale;
+                            mat.uniforms.uBackgroundColor.value.set(...cur.halo.backgroundColor);
                         }
                     }
 
@@ -4021,6 +4475,40 @@
                     hue: 0,
                     saturation: 1,
                 },
+                chromaticLight: {
+                    speed: 0.2,
+                    traceSteps: 114,
+                    warpSteps: 6,
+                    initialDepth: 6.1,
+                    baseStep: 0.001,
+                    depthTarget: 3.8,
+                    depthBlend: 0.5,
+                    stepDivisor: 11.6,
+                    warpSpatialScale: 0.86,
+                    warpAmplitude: 1.1,
+                    warpTurnSmoothing: -0.02,
+                    fieldSmoothness: 0.01,
+                    colorFrequency: 0.15,
+                    exposure: 30000,
+                    fractalColor: [1.0, 1.0, 1.0],
+                    backgroundColor: [0.0, 0.0, 0.0],
+                },
+                halo: {
+                    fieldTimeRate: 0.10,
+                    forwardTravelRate: 0.23,
+                    initialDepth: 1.46,
+                    safeMinimum: 0.0001,
+                    domainStrength: 1.69,
+                    domainScale: 3.84,
+                    domainAttenuation: 3.86,
+                    cameraFocalLength: 0.22,
+                    fieldSlope: -0.10,
+                    fieldDetailScale: 4.60,
+                    distanceBase: 2.60,
+                    distanceDepthFactor: 0.45,
+                    exposureScale: 2000.0,
+                    backgroundColor: [0.0, 0.0, 0.0],
+                },
                 blurStrength: 0.0,
                 isFrozen: false,
                 manualTime: 0,
@@ -4084,6 +4572,30 @@
                         color2: hexToRgbArray(preset.values.color2),
                         color3: hexToRgbArray(preset.values.color3),
                         color4: hexToRgbArray(preset.values.color4),
+                    },
+                }));
+            };
+
+            // Same "stamp, don't lock" behavior for Chromatic Light and Halo presets.
+            const applyChromaticLightPreset = (preset) => {
+                setSettings(p => ({
+                    ...p,
+                    chromaticLight: {
+                        ...p.chromaticLight,
+                        ...preset.values,
+                        fractalColor: hexToRgbArray(preset.values.fractalColor),
+                        backgroundColor: hexToRgbArray(preset.values.backgroundColor),
+                    },
+                }));
+            };
+
+            const applyHaloPreset = (preset) => {
+                setSettings(p => ({
+                    ...p,
+                    halo: {
+                        ...p.halo,
+                        ...preset.values,
+                        backgroundColor: hexToRgbArray(preset.values.backgroundColor),
                     },
                 }));
             };
@@ -4240,7 +4752,7 @@
                         <div className="space-y-3 pt-4 border-t border-white/10">
                             <StaticSelect
                                 label={t('activeShader')}
-                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi'].map(v => ({
+                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi', 'chromaticLight', 'halo'].map(v => ({
                                     value: v,
                                     label: v === 'luminousResin' ? t('luminousResin') : t(v),
                                 }))}
@@ -5122,6 +5634,133 @@
                                     update={v => updateNested('voronoi', 'hue', v)} dir={dir} />
                                 <ShaderSlider label={t('saturation')} value={settings.voronoi.saturation} min={0} max={2} step={0.05}
                                     update={v => updateNested('voronoi', 'saturation', v)} dir={dir} />
+                            </>
+                        )}
+
+                        {/* CHROMATIC LIGHT SHADER */}
+                        {settings.activeShader === 'chromaticLight' && (
+                            <>
+                                <div className="space-y-2">
+                                    <span className="text-xs uppercase text-gray-500 font-bold tracking-widest block">
+                                        {t('presets')}
+                                    </span>
+                                    <div className="flex flex-wrap gap-2">
+                                        {chromaticLightPresets.map((preset) => (
+                                            <button
+                                                key={preset.name}
+                                                type="button"
+                                                onClick={() => applyChromaticLightPreset(preset)}
+                                                className="px-3 py-1.5 text-xs rounded-lg bg-white/5 border border-white/10 text-gray-300 hover:bg-accent hover:text-black hover:border-accent transition-colors"
+                                            >
+                                                {preset.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <ShaderSlider label={t('speed')} value={settings.chromaticLight.speed} min={0} max={1} step={0.001}
+                                    update={v => updateNested('chromaticLight', 'speed', v)} dir={dir} />
+                                <ShaderSlider label={t('traceSteps')} value={settings.chromaticLight.traceSteps} min={30} max={180} step={1}
+                                    update={v => updateNested('chromaticLight', 'traceSteps', v)} dir={dir} />
+                                <ShaderSlider label={t('warpSteps')} value={settings.chromaticLight.warpSteps} min={1} max={10} step={1}
+                                    update={v => updateNested('chromaticLight', 'warpSteps', v)} dir={dir} />
+                                <ShaderSlider label={t('initialDepth')} value={settings.chromaticLight.initialDepth} min={0.1} max={12} step={0.01}
+                                    update={v => updateNested('chromaticLight', 'initialDepth', v)} dir={dir} />
+                                <ShaderSlider label={t('depthTarget')} value={settings.chromaticLight.depthTarget} min={-2} max={10} step={0.01}
+                                    update={v => updateNested('chromaticLight', 'depthTarget', v)} dir={dir} />
+                                <ShaderSlider label={t('depthBlend')} value={settings.chromaticLight.depthBlend} min={0} max={1.5} step={0.001}
+                                    update={v => updateNested('chromaticLight', 'depthBlend', v)} dir={dir} />
+                                <ShaderSlider label={t('baseStep')} value={settings.chromaticLight.baseStep} min={0.0001} max={0.02} step={0.0001}
+                                    update={v => updateNested('chromaticLight', 'baseStep', v)} dir={dir} />
+                                <ShaderSlider label={t('stepDivisor')} value={settings.chromaticLight.stepDivisor} min={1} max={30} step={0.01}
+                                    update={v => updateNested('chromaticLight', 'stepDivisor', v)} dir={dir} />
+                                <ShaderSlider label={t('warpSpatialScale')} value={settings.chromaticLight.warpSpatialScale} min={0.1} max={2} step={0.001}
+                                    update={v => updateNested('chromaticLight', 'warpSpatialScale', v)} dir={dir} />
+                                <ShaderSlider label={t('warpAmplitude')} value={settings.chromaticLight.warpAmplitude} min={0} max={3} step={0.001}
+                                    update={v => updateNested('chromaticLight', 'warpAmplitude', v)} dir={dir} />
+                                <ShaderSlider label={t('warpTurnSmoothing')} value={settings.chromaticLight.warpTurnSmoothing} min={-0.5} max={1} step={0.001}
+                                    update={v => updateNested('chromaticLight', 'warpTurnSmoothing', v)} dir={dir} />
+                                <ShaderSlider label={t('fieldSmoothness')} value={settings.chromaticLight.fieldSmoothness} min={0.0001} max={0.2} step={0.0001}
+                                    update={v => updateNested('chromaticLight', 'fieldSmoothness', v)} dir={dir} />
+                                <ShaderSlider label={t('colorFrequency')} value={settings.chromaticLight.colorFrequency} min={0} max={1} step={0.001}
+                                    update={v => updateNested('chromaticLight', 'colorFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('exposure')} value={settings.chromaticLight.exposure} min={1000} max={100000} step={10}
+                                    update={v => updateNested('chromaticLight', 'exposure', v)} dir={dir} />
+
+                                <div className="flex flex-wrap gap-6 mt-4">
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('fractalColor')}</span>
+                                        <ColorPicker
+                                            color={rgbArrayToHex(settings.chromaticLight.fractalColor)}
+                                            onChange={h => updateNested('chromaticLight', 'fractalColor', hexToRgbArray(h))}
+                                        />
+                                    </div>
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('colorBack')}</span>
+                                        <ColorPicker
+                                            color={rgbArrayToHex(settings.chromaticLight.backgroundColor)}
+                                            onChange={h => updateNested('chromaticLight', 'backgroundColor', hexToRgbArray(h))}
+                                        />
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* HALO SHADER */}
+                        {settings.activeShader === 'halo' && (
+                            <>
+                                <div className="space-y-2">
+                                    <span className="text-xs uppercase text-gray-500 font-bold tracking-widest block">
+                                        {t('presets')}
+                                    </span>
+                                    <div className="flex flex-wrap gap-2">
+                                        {haloPresets.map((preset) => (
+                                            <button
+                                                key={preset.name}
+                                                type="button"
+                                                onClick={() => applyHaloPreset(preset)}
+                                                className="px-3 py-1.5 text-xs rounded-lg bg-white/5 border border-white/10 text-gray-300 hover:bg-accent hover:text-black hover:border-accent transition-colors"
+                                            >
+                                                {preset.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <ShaderSlider label={t('fieldTimeRate')} value={settings.halo.fieldTimeRate} min={0} max={1} step={0.001}
+                                    update={v => updateNested('halo', 'fieldTimeRate', v)} dir={dir} />
+                                <ShaderSlider label={t('forwardTravelRate')} value={settings.halo.forwardTravelRate} min={-1} max={1} step={0.001}
+                                    update={v => updateNested('halo', 'forwardTravelRate', v)} dir={dir} />
+                                <ShaderSlider label={t('cameraFocalLength')} value={settings.halo.cameraFocalLength} min={0.03} max={1} step={0.001}
+                                    update={v => updateNested('halo', 'cameraFocalLength', v)} dir={dir} />
+                                <ShaderSlider label={t('initialDepth')} value={settings.halo.initialDepth} min={0.05} max={8} step={0.001}
+                                    update={v => updateNested('halo', 'initialDepth', v)} dir={dir} />
+                                <ShaderSlider label={t('domainStrength')} value={settings.halo.domainStrength} min={0} max={5} step={0.001}
+                                    update={v => updateNested('halo', 'domainStrength', v)} dir={dir} />
+                                <ShaderSlider label={t('domainScale')} value={settings.halo.domainScale} min={0.1} max={12} step={0.001}
+                                    update={v => updateNested('halo', 'domainScale', v)} dir={dir} />
+                                <ShaderSlider label={t('domainAttenuation')} value={settings.halo.domainAttenuation} min={0.01} max={12} step={0.001}
+                                    update={v => updateNested('halo', 'domainAttenuation', v)} dir={dir} />
+                                <ShaderSlider label={t('fieldSlope')} value={settings.halo.fieldSlope} min={-2} max={2} step={0.001}
+                                    update={v => updateNested('halo', 'fieldSlope', v)} dir={dir} />
+                                <ShaderSlider label={t('fieldDetailScale')} value={settings.halo.fieldDetailScale} min={0.1} max={15} step={0.001}
+                                    update={v => updateNested('halo', 'fieldDetailScale', v)} dir={dir} />
+                                <ShaderSlider label={t('distanceBase')} value={settings.halo.distanceBase} min={0.01} max={10} step={0.001}
+                                    update={v => updateNested('halo', 'distanceBase', v)} dir={dir} />
+                                <ShaderSlider label={t('distanceDepthFactor')} value={settings.halo.distanceDepthFactor} min={0} max={3} step={0.001}
+                                    update={v => updateNested('halo', 'distanceDepthFactor', v)} dir={dir} />
+                                <ShaderSlider label={t('safeMinimum')} value={settings.halo.safeMinimum} min={0.000001} max={0.01} step={0.000001}
+                                    update={v => updateNested('halo', 'safeMinimum', v)} dir={dir} />
+                                <ShaderSlider label={t('exposureScale')} value={settings.halo.exposureScale} min={50} max={10000} step={1}
+                                    update={v => updateNested('halo', 'exposureScale', v)} dir={dir} />
+
+                                <div className="space-y-2 mt-4">
+                                    <span className="text-xs uppercase text-gray-500">{t('colorBack')}</span>
+                                    <ColorPicker
+                                        color={rgbArrayToHex(settings.halo.backgroundColor)}
+                                        onChange={h => updateNested('halo', 'backgroundColor', hexToRgbArray(h))}
+                                    />
+                                </div>
                             </>
                         )}
                         </div>
