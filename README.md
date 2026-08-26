@@ -97,3 +97,9 @@ The app is fully localized into:
 [Abstract Chromatic Light](https://codepen.io/editor/sabosugi/pen/019fa4fd-6341-7983-b8f4-81dff70f7e62) by [Sabo Sugi](https://codepen.io/sabosugi)
 
 [Enter to Other Dimension](https://codepen.io/editor/sabosugi/pen/019fa3cf-2f37-771c-8735-81f31d1e7e0e) by [Sabo Sugi](https://codepen.io/sabosugi)
+
+[Rainbow Travel](https://www.shadertoy.com/view/f3XGWS) by [noztol](https://www.shadertoy.com/user/noztol)
+
+[Formless](https://www.shadertoy.com/view/Ncy3R3) by [noztol](https://www.shadertoy.com/user/noztol)
+
+[Neon Kaleidoscope](https://codepen.io/editor/sabosugi/pen/01a02f92-c5a4-7680-9919-88d6778ba369) by [Sabo Sugi](https://codepen.io/sabosugi)
