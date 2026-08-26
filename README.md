@@ -103,3 +103,5 @@ The app is fully localized into:
 [Formless](https://www.shadertoy.com/view/Ncy3R3) by [noztol](https://www.shadertoy.com/user/noztol)
 
 [Neon Kaleidoscope](https://codepen.io/editor/sabosugi/pen/01a02f92-c5a4-7680-9919-88d6778ba369) by [Sabo Sugi](https://codepen.io/sabosugi)
+
+[Happy Glow Cruise](https://www.shadertoy.com/view/3ccyD7) by [diatribes](https://www.shadertoy.com/user/diatribes)
