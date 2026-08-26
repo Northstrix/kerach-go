@@ -2367,6 +2367,145 @@
         }
         `;
 
+        const glowCruiseFragShader = `precision highp float;
+
+        uniform vec3 iResolution;
+        uniform float iTime;
+
+        uniform float uTimeScale;
+        uniform float uPathFreqX;
+        uniform float uPathAmpX;
+        uniform float uPathFreqY;
+        uniform float uPathAmpY;
+        uniform float uRollFreq;
+        uniform float uRollAmp;
+        uniform float uOrbWobbleXFreq;
+        uniform float uOrbWobbleXAmp;
+        uniform float uOrbWobbleYFreq;
+        uniform float uOrbWobbleYAmp;
+        uniform float uOrbZOffset;
+        uniform float uOrbZWobbleFreq;
+        uniform float uOrbZWobbleInner;
+        uniform float uOrbZWobbleAmp;
+        uniform float uMengerBaseScale;
+        uniform float uMengerScale1;
+        uniform float uMengerHole1;
+        uniform float uMengerScale2;
+        uniform float uMengerHole2;
+        uniform float uTunnelSize;
+        uniform float uPathYOffset;
+        uniform float uFloorLevel;
+        uniform float uOrbRadius;
+        uniform float uMaxSteps;
+        uniform float uMaxDist;
+        uniform float uStepBase;
+        uniform float uStepMultiplier;
+        uniform float uLightGlowScale;
+        uniform vec3 uWallColor;
+        uniform float uWallBrightness;
+        uniform vec3 uGlowColor;
+        uniform float uGlowBrightness;
+        uniform float uToneMapDivisor;
+
+        uniform float uHue;
+        uniform float uSaturation;
+
+        ${hueSatHelpers}
+
+        float glowCruiseLight;
+
+        vec3 gcPath(float z) {
+            return vec3(
+                cos(z * uPathFreqX) * uPathAmpX,
+                cos(z * uPathFreqY) * uPathAmpY,
+                z
+            );
+        }
+
+        mat2 gcRot(float a) {
+            return mat2(cos(a + vec4(0.0, 33.0, 11.0, 0.0)));
+        }
+
+        float gcOrb(vec3 p, float t) {
+            vec3 q = gcPath(p.z);
+            return length(p - vec3(
+                q.x + sin(p.z * uOrbWobbleXFreq) * uOrbWobbleXAmp,
+                q.y + sin(sin(p.z * uOrbWobbleYFreq) + t) * uOrbWobbleYAmp,
+                uOrbZOffset + t + tan(cos(t * uOrbZWobbleFreq) * uOrbZWobbleInner) * uOrbZWobbleAmp
+            ));
+        }
+
+        float gcFractal(vec3 q) {
+            vec3 p;
+            float s = uMengerBaseScale;
+            float d = 9e9;
+
+            s /= uMengerScale1;
+            p = abs(fract(q / s) * s - s * 0.5);
+            d = min(d, min(max(p.x, p.y), min(max(p.y, p.z), max(p.x, p.z))) - s / uMengerHole1);
+
+            s /= uMengerScale2;
+            p = abs(fract(q / s) * s - s * 0.5);
+            d = max(d, min(max(p.x, p.y), min(max(p.y, p.z), max(p.x, p.z))) - s / uMengerHole2);
+
+            return d;
+        }
+
+        float gcMap(vec3 p, float t) {
+            float s, o;
+            vec3 q = p;
+            p.xy -= gcPath(p.z).xy;
+            p.y += uPathYOffset;
+            s = max(uTunnelSize - abs(p.x), uTunnelSize - abs(p.y));
+            s = min(s, gcFractal(p));
+            o = gcOrb(q, t) - uOrbRadius;
+            s = min(s, o);
+            glowCruiseLight += 1.0 / max(o, 0.001);
+            return min(o, max(-q.y - uFloorLevel, s));
+        }
+
+        void main() {
+            float t = iTime * uTimeScale;
+
+            vec3 res = iResolution;
+            vec3 p = gcPath(t);
+            vec3 ro = p;
+            vec3 Z = normalize(gcPath(t + 3.0) - p);
+            vec3 X = normalize(vec3(Z.z, 0.0, -Z.x));
+            vec2 uv = (gl_FragCoord.xy - res.xy * 0.5) / res.y;
+            vec3 D = vec3(gcRot(sin(t * uRollFreq) * uRollAmp) * uv, 1.0) * mat3(-X, cross(X, Z), Z);
+
+            vec4 o = vec4(0.0);
+            glowCruiseLight = 0.0;
+            float s = 0.0;
+            float d = 0.0;
+
+            vec3 wallTint = uWallColor * uWallBrightness;
+            vec3 glowTint = uGlowColor * uGlowBrightness;
+
+            for (int idx = 0; idx < 200; idx++) {
+                if (float(idx) >= uMaxSteps || d >= uMaxDist) break;
+
+                p = ro + D * d;
+                s = uStepBase + uStepMultiplier * abs(gcMap(p, t));
+                d += s;
+
+                o += vec4(wallTint, 0.0) / s + uLightGlowScale * vec4(glowTint, 0.0) * glowCruiseLight / d;
+            }
+
+            vec3 toneIn = clamp((o.rgb * o.rgb) / uToneMapDivisor, vec3(-15.0), vec3(15.0));
+            vec3 e2 = exp(2.0 * toneIn);
+            vec3 col = (e2 - 1.0) / (e2 + 1.0);
+
+            vec3 hsv = rgb2hsv(clamp(col, 0.0, 1.0));
+            hsv.x = fract(hsv.x + uHue / 360.0);
+            hsv.y = clamp(hsv.y * uSaturation, 0.0, 1.0);
+            col = hsv2rgb(hsv);
+
+            gl_FragColor = vec4(col, 1.0);
+        }
+        `;
+
         // =========================================================================
         // LOCALIZATION
         // =========================================================================
@@ -2482,6 +2621,20 @@
                 colorRate: "Color Rate", phaseRate: "Phase Rate", layerShift: "Layer Shift",
                 bandFrequency: "Band Frequency", bandDivisor: "Band Divisor",
                 lightWidth: "Light Width", lightPower: "Light Power",
+                glowCruise: "Glow Cruise",
+                timeScale: "Time Scale", pathFreqX: "Path Frequency X", pathAmpX: "Path Amplitude X",
+                pathFreqY: "Path Frequency Y", pathAmpY: "Path Amplitude Y",
+                rollFreq: "Roll Frequency", rollAmp: "Roll Amount",
+                orbWobbleXFreq: "Orb Wobble Frequency X", orbWobbleXAmp: "Orb Wobble Amount X",
+                orbWobbleYFreq: "Orb Wobble Frequency Y", orbWobbleYAmp: "Orb Wobble Amount Y",
+                orbZOffset: "Orb Z Offset", orbZWobbleFreq: "Orb Z Wobble Frequency",
+                orbZWobbleInner: "Orb Z Wobble Inner", orbZWobbleAmp: "Orb Z Wobble Amount",
+                mengerBaseScale: "Menger Base Scale", mengerScale1: "Menger Scale 1", mengerHole1: "Menger Hole 1",
+                mengerScale2: "Menger Scale 2", mengerHole2: "Menger Hole 2",
+                tunnelSize: "Tunnel Size", pathYOffset: "Path Y Offset", floorLevel: "Floor Level", orbRadius: "Orb Radius",
+                maxSteps: "Max Steps", maxDist: "Max Distance", stepBase: "Step Base", stepMultiplier: "Step Multiplier",
+                lightGlowScale: "Light Glow Scale", wallColor: "Wall Color", wallBrightness: "Wall Brightness",
+                glowColor: "Glow Color", glowBrightness: "Glow Brightness", toneMapDivisor: "Tone Map Divisor",
             },
             he: {
                 appName: "קרח Go",
@@ -2591,6 +2744,20 @@
                 colorRate: "קצב צבע", phaseRate: "קצב פאזה", layerShift: "היסט שכבה",
                 bandFrequency: "תדירות רצועה", bandDivisor: "מחלק רצועה",
                 lightWidth: "רוחב אור", lightPower: "עוצמת אור",
+                glowCruise: "שייט זוהר",
+                timeScale: "קנה מידת זמן", pathFreqX: "תדירות מסלול X", pathAmpX: "משרעת מסלול X",
+                pathFreqY: "תדירות מסלול Y", pathAmpY: "משרעת מסלול Y",
+                rollFreq: "תדירות הטיה", rollAmp: "כמות הטיה",
+                orbWobbleXFreq: "תדירות תנודת כדור X", orbWobbleXAmp: "כמות תנודת כדור X",
+                orbWobbleYFreq: "תדירות תנודת כדור Y", orbWobbleYAmp: "כמות תנודת כדור Y",
+                orbZOffset: "היסט כדור Z", orbZWobbleFreq: "תדירות תנודת כדור Z",
+                orbZWobbleInner: "תנודת כדור פנימית Z", orbZWobbleAmp: "כמות תנודת כדור Z",
+                mengerBaseScale: "קנה מידת בסיס מנגר", mengerScale1: "קנה מידת מנגר 1", mengerHole1: "חור מנגר 1",
+                mengerScale2: "קנה מידת מנגר 2", mengerHole2: "חור מנגר 2",
+                tunnelSize: "גודל מנהרה", pathYOffset: "היסט מסלול Y", floorLevel: "מפלס רצפה", orbRadius: "רדיוס כדור",
+                maxSteps: "צעדים מרביים", maxDist: "מרחק מרבי", stepBase: "בסיס צעד", stepMultiplier: "מכפיל צעד",
+                lightGlowScale: "קנה מידת זוהר אור", wallColor: "צבע קיר", wallBrightness: "בהירות קיר",
+                glowColor: "צבע זוהר", glowBrightness: "בהירות זוהר", toneMapDivisor: "מחלק מיפוי גוונים",
             },
             it: {
                 appName: "Kerach Go",
@@ -2700,6 +2867,20 @@
                 colorRate: "Velocità Colore", phaseRate: "Velocità Fase", layerShift: "Spostamento Livello",
                 bandFrequency: "Frequenza Banda", bandDivisor: "Divisore Banda",
                 lightWidth: "Larghezza Luce", lightPower: "Potenza Luce",
+                glowCruise: "Crociera Luminosa",
+                timeScale: "Scala Temporale", pathFreqX: "Frequenza Percorso X", pathAmpX: "Ampiezza Percorso X",
+                pathFreqY: "Frequenza Percorso Y", pathAmpY: "Ampiezza Percorso Y",
+                rollFreq: "Frequenza Rollio", rollAmp: "Quantità Rollio",
+                orbWobbleXFreq: "Frequenza Oscillazione Sfera X", orbWobbleXAmp: "Ampiezza Oscillazione Sfera X",
+                orbWobbleYFreq: "Frequenza Oscillazione Sfera Y", orbWobbleYAmp: "Ampiezza Oscillazione Sfera Y",
+                orbZOffset: "Offset Sfera Z", orbZWobbleFreq: "Frequenza Oscillazione Sfera Z",
+                orbZWobbleInner: "Oscillazione Interna Sfera Z", orbZWobbleAmp: "Ampiezza Oscillazione Sfera Z",
+                mengerBaseScale: "Scala Base Menger", mengerScale1: "Scala Menger 1", mengerHole1: "Foro Menger 1",
+                mengerScale2: "Scala Menger 2", mengerHole2: "Foro Menger 2",
+                tunnelSize: "Dimensione Tunnel", pathYOffset: "Offset Percorso Y", floorLevel: "Livello Pavimento", orbRadius: "Raggio Sfera",
+                maxSteps: "Passi Massimi", maxDist: "Distanza Massima", stepBase: "Base Passo", stepMultiplier: "Moltiplicatore Passo",
+                lightGlowScale: "Scala Bagliore Luce", wallColor: "Colore Parete", wallBrightness: "Luminosità Parete",
+                glowColor: "Colore Bagliore", glowBrightness: "Luminosità Bagliore", toneMapDivisor: "Divisore Mappatura Toni",
             },
             es: {
                 appName: "Kerach Go",
@@ -2809,6 +2990,20 @@
                 colorRate: "Velocidad de Color", phaseRate: "Velocidad de Fase", layerShift: "Desplazamiento de Capa",
                 bandFrequency: "Frecuencia de Banda", bandDivisor: "Divisor de Banda",
                 lightWidth: "Ancho de Luz", lightPower: "Potencia de Luz",
+                glowCruise: "Crucero Luminoso",
+                timeScale: "Escala de Tiempo", pathFreqX: "Frecuencia de Trayectoria X", pathAmpX: "Amplitud de Trayectoria X",
+                pathFreqY: "Frecuencia de Trayectoria Y", pathAmpY: "Amplitud de Trayectoria Y",
+                rollFreq: "Frecuencia de Balanceo", rollAmp: "Cantidad de Balanceo",
+                orbWobbleXFreq: "Frecuencia de Oscilación del Orbe X", orbWobbleXAmp: "Amplitud de Oscilación del Orbe X",
+                orbWobbleYFreq: "Frecuencia de Oscilación del Orbe Y", orbWobbleYAmp: "Amplitud de Oscilación del Orbe Y",
+                orbZOffset: "Desplazamiento del Orbe Z", orbZWobbleFreq: "Frecuencia de Oscilación del Orbe Z",
+                orbZWobbleInner: "Oscilación Interna del Orbe Z", orbZWobbleAmp: "Amplitud de Oscilación del Orbe Z",
+                mengerBaseScale: "Escala Base de Menger", mengerScale1: "Escala de Menger 1", mengerHole1: "Agujero de Menger 1",
+                mengerScale2: "Escala de Menger 2", mengerHole2: "Agujero de Menger 2",
+                tunnelSize: "Tamaño del Túnel", pathYOffset: "Desplazamiento de Trayectoria Y", floorLevel: "Nivel del Suelo", orbRadius: "Radio del Orbe",
+                maxSteps: "Pasos Máximos", maxDist: "Distancia Máxima", stepBase: "Base de Paso", stepMultiplier: "Multiplicador de Paso",
+                lightGlowScale: "Escala de Brillo de Luz", wallColor: "Color de Pared", wallBrightness: "Brillo de Pared",
+                glowColor: "Color de Brillo", glowBrightness: "Brillo del Resplandor", toneMapDivisor: "Divisor de Mapeo de Tonos",
             },
             pt: {
                 appName: "Kerach Go",
@@ -2918,6 +3113,20 @@
                 colorRate: "Velocidade de Cor", phaseRate: "Velocidade de Fase", layerShift: "Deslocamento de Camada",
                 bandFrequency: "Frequência de Faixa", bandDivisor: "Divisor de Faixa",
                 lightWidth: "Largura da Luz", lightPower: "Potência da Luz",
+                glowCruise: "Cruzeiro Luminoso",
+                timeScale: "Escala de Tempo", pathFreqX: "Frequência de Trajetória X", pathAmpX: "Amplitude de Trajetória X",
+                pathFreqY: "Frequência de Trajetória Y", pathAmpY: "Amplitude de Trajetória Y",
+                rollFreq: "Frequência de Rolagem", rollAmp: "Quantidade de Rolagem",
+                orbWobbleXFreq: "Frequência de Oscilação do Orbe X", orbWobbleXAmp: "Amplitude de Oscilação do Orbe X",
+                orbWobbleYFreq: "Frequência de Oscilação do Orbe Y", orbWobbleYAmp: "Amplitude de Oscilação do Orbe Y",
+                orbZOffset: "Deslocamento do Orbe Z", orbZWobbleFreq: "Frequência de Oscilação do Orbe Z",
+                orbZWobbleInner: "Oscilação Interna do Orbe Z", orbZWobbleAmp: "Amplitude de Oscilação do Orbe Z",
+                mengerBaseScale: "Escala Base de Menger", mengerScale1: "Escala de Menger 1", mengerHole1: "Furo de Menger 1",
+                mengerScale2: "Escala de Menger 2", mengerHole2: "Furo de Menger 2",
+                tunnelSize: "Tamanho do Túnel", pathYOffset: "Deslocamento de Trajetória Y", floorLevel: "Nível do Chão", orbRadius: "Raio do Orbe",
+                maxSteps: "Passos Máximos", maxDist: "Distância Máxima", stepBase: "Base do Passo", stepMultiplier: "Multiplicador de Passo",
+                lightGlowScale: "Escala de Brilho da Luz", wallColor: "Cor da Parede", wallBrightness: "Brilho da Parede",
+                glowColor: "Cor do Brilho", glowBrightness: "Brilho do Resplendor", toneMapDivisor: "Divisor de Mapeamento de Tons",
             },
             ja: {
                 appName: "Kerach Go", controls: "コントロール", shader: "シェーダー", palette: "パレット", mix: "ミックス",
@@ -3025,6 +3234,20 @@
                 colorRate: "色変化率", phaseRate: "位相変化率", layerShift: "レイヤーシフト",
                 bandFrequency: "バンド周波数", bandDivisor: "バンド除数",
                 lightWidth: "光の幅", lightPower: "光の強さ",
+                glowCruise: "グロークルーズ",
+                timeScale: "時間スケール", pathFreqX: "パス周波数X", pathAmpX: "パス振幅X",
+                pathFreqY: "パス周波数Y", pathAmpY: "パス振幅Y",
+                rollFreq: "ロール周波数", rollAmp: "ロール量",
+                orbWobbleXFreq: "オーブ揺れ周波数X", orbWobbleXAmp: "オーブ揺れ量X",
+                orbWobbleYFreq: "オーブ揺れ周波数Y", orbWobbleYAmp: "オーブ揺れ量Y",
+                orbZOffset: "オーブZオフセット", orbZWobbleFreq: "オーブZ揺れ周波数",
+                orbZWobbleInner: "オーブZ内部揺れ", orbZWobbleAmp: "オーブZ揺れ量",
+                mengerBaseScale: "メンガー基本スケール", mengerScale1: "メンガースケール1", mengerHole1: "メンガー穴1",
+                mengerScale2: "メンガースケール2", mengerHole2: "メンガー穴2",
+                tunnelSize: "トンネルサイズ", pathYOffset: "パスYオフセット", floorLevel: "床のレベル", orbRadius: "オーブ半径",
+                maxSteps: "最大ステップ数", maxDist: "最大距離", stepBase: "ステップ基本値", stepMultiplier: "ステップ乗数",
+                lightGlowScale: "光の輝きスケール", wallColor: "壁の色", wallBrightness: "壁の明るさ",
+                glowColor: "輝きの色", glowBrightness: "輝きの明るさ", toneMapDivisor: "トーンマップ除数",
             },
             yue: {
                 appName: "Kerach Go", controls: "控制", shader: "着色器", palette: "調色盤", mix: "混合",
@@ -3130,6 +3353,20 @@
                 colorRate: "顏色速率", phaseRate: "相位速率", layerShift: "層偏移",
                 bandFrequency: "條帶頻率", bandDivisor: "條帶除數",
                 lightWidth: "光寬度", lightPower: "光強度",
+                glowCruise: "光輝巡航",
+                timeScale: "時間比例", pathFreqX: "路徑頻率X", pathAmpX: "路徑振幅X",
+                pathFreqY: "路徑頻率Y", pathAmpY: "路徑振幅Y",
+                rollFreq: "橫滾頻率", rollAmp: "橫滾量",
+                orbWobbleXFreq: "光球擺動頻率X", orbWobbleXAmp: "光球擺動幅度X",
+                orbWobbleYFreq: "光球擺動頻率Y", orbWobbleYAmp: "光球擺動幅度Y",
+                orbZOffset: "光球Z偏移", orbZWobbleFreq: "光球Z擺動頻率",
+                orbZWobbleInner: "光球Z內部擺動", orbZWobbleAmp: "光球Z擺動幅度",
+                mengerBaseScale: "門格爾基礎比例", mengerScale1: "門格爾比例1", mengerHole1: "門格爾孔洞1",
+                mengerScale2: "門格爾比例2", mengerHole2: "門格爾孔洞2",
+                tunnelSize: "隧道大小", pathYOffset: "路徑Y偏移", floorLevel: "地板高度", orbRadius: "光球半徑",
+                maxSteps: "最大步數", maxDist: "最大距離", stepBase: "步進基礎值", stepMultiplier: "步進乘數",
+                lightGlowScale: "光暈比例", wallColor: "牆壁顏色", wallBrightness: "牆壁亮度",
+                glowColor: "光暈顏色", glowBrightness: "光暈亮度", toneMapDivisor: "色調映射除數",
             }
         };
 
@@ -3777,6 +4014,7 @@
 [Rainbow Travel](https://www.shadertoy.com/view/f3XGWS) by [noztol](https://www.shadertoy.com/user/noztol)
 [Formless](https://www.shadertoy.com/view/Ncy3R3) by [noztol](https://www.shadertoy.com/user/noztol)
 [Neon Kaleidoscope](https://codepen.io/editor/sabosugi/pen/01a02f92-c5a4-7680-9919-88d6778ba369) by [Sabo Sugi](https://codepen.io/sabosugi)
+[Happy Glow Cruise](https://www.shadertoy.com/view/3ccyD7) by [diatribes](https://www.shadertoy.com/user/diatribes)
         `;
 
         function CreditHighlightHover({ children, href, className }) {
@@ -4584,6 +4822,48 @@
                         uSaturation: { value: 1.0 },
                         uBaseColor: { value: new THREE.Vector4(0.2392, 0.3647, 1.0, 1.0) },
                     });
+                } else if (type === 'glowCruise') {
+                    baseFragment = glowCruiseFragShader;
+                    Object.assign(uniforms, {
+                        iResolution: { value: new THREE.Vector3() },
+                        iTime: { value: 0.0 },
+                        uTimeScale: { value: 6.0 },
+                        uPathFreqX: { value: 0.05 },
+                        uPathAmpX: { value: 16.0 },
+                        uPathFreqY: { value: 0.1 },
+                        uPathAmpY: { value: 8.0 },
+                        uRollFreq: { value: 0.2 },
+                        uRollAmp: { value: 0.3 },
+                        uOrbWobbleXFreq: { value: 0.4 },
+                        uOrbWobbleXAmp: { value: 0.4 },
+                        uOrbWobbleYFreq: { value: 0.3 },
+                        uOrbWobbleYAmp: { value: 0.5 },
+                        uOrbZOffset: { value: 5.0 },
+                        uOrbZWobbleFreq: { value: 0.2 },
+                        uOrbZWobbleInner: { value: 0.5 },
+                        uOrbZWobbleAmp: { value: 3.2 },
+                        uMengerBaseScale: { value: 4.0 },
+                        uMengerScale1: { value: 1.0 },
+                        uMengerHole1: { value: 6.0 },
+                        uMengerScale2: { value: 4.0 },
+                        uMengerHole2: { value: 3.5 },
+                        uTunnelSize: { value: 1.0 },
+                        uPathYOffset: { value: 0.1 },
+                        uFloorLevel: { value: 5.35 },
+                        uOrbRadius: { value: 0.01 },
+                        uMaxSteps: { value: 50.0 },
+                        uMaxDist: { value: 50.0 },
+                        uStepBase: { value: 0.01 },
+                        uStepMultiplier: { value: 0.65 },
+                        uLightGlowScale: { value: 60.0 },
+                        uWallColor: { value: new THREE.Vector3(0.2, 1.0, 0.4) },
+                        uWallBrightness: { value: 10.0 },
+                        uGlowColor: { value: new THREE.Vector3(0.25, 0.125, 1.0) },
+                        uGlowBrightness: { value: 8.0 },
+                        uToneMapDivisor: { value: 4e8 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                    });
                 } else {
                     baseFragment = meltFragShader;
                     Object.assign(uniforms, {
@@ -5061,6 +5341,48 @@
                             mat.uniforms.uSaturation.value = cur.neonKaleidoscope.saturation;
                             const [bcr, bcg, bcb] = hexToRgbArray(cur.neonKaleidoscope.baseColor);
                             mat.uniforms.uBaseColor.value.set(bcr, bcg, bcb, 1.0);
+                        } else if (cur.activeShader === 'glowCruise') {
+                            // Raw elapsed + its own uTimeScale uniform - internal iTime*uTimeScale
+                            // multiply, so Speed (uTimeScale) & Freeze/manual-time work correctly.
+                            mat.uniforms.iTime.value = elapsed;
+                            mat.uniforms.uTimeScale.value = cur.glowCruise.timeScale;
+                            mat.uniforms.uPathFreqX.value = cur.glowCruise.pathFreqX;
+                            mat.uniforms.uPathAmpX.value = cur.glowCruise.pathAmpX;
+                            mat.uniforms.uPathFreqY.value = cur.glowCruise.pathFreqY;
+                            mat.uniforms.uPathAmpY.value = cur.glowCruise.pathAmpY;
+                            mat.uniforms.uRollFreq.value = cur.glowCruise.rollFreq;
+                            mat.uniforms.uRollAmp.value = cur.glowCruise.rollAmp;
+                            mat.uniforms.uOrbWobbleXFreq.value = cur.glowCruise.orbWobbleXFreq;
+                            mat.uniforms.uOrbWobbleXAmp.value = cur.glowCruise.orbWobbleXAmp;
+                            mat.uniforms.uOrbWobbleYFreq.value = cur.glowCruise.orbWobbleYFreq;
+                            mat.uniforms.uOrbWobbleYAmp.value = cur.glowCruise.orbWobbleYAmp;
+                            mat.uniforms.uOrbZOffset.value = cur.glowCruise.orbZOffset;
+                            mat.uniforms.uOrbZWobbleFreq.value = cur.glowCruise.orbZWobbleFreq;
+                            mat.uniforms.uOrbZWobbleInner.value = cur.glowCruise.orbZWobbleInner;
+                            mat.uniforms.uOrbZWobbleAmp.value = cur.glowCruise.orbZWobbleAmp;
+                            mat.uniforms.uMengerBaseScale.value = cur.glowCruise.mengerBaseScale;
+                            mat.uniforms.uMengerScale1.value = cur.glowCruise.mengerScale1;
+                            mat.uniforms.uMengerHole1.value = cur.glowCruise.mengerHole1;
+                            mat.uniforms.uMengerScale2.value = cur.glowCruise.mengerScale2;
+                            mat.uniforms.uMengerHole2.value = cur.glowCruise.mengerHole2;
+                            mat.uniforms.uTunnelSize.value = cur.glowCruise.tunnelSize;
+                            mat.uniforms.uPathYOffset.value = cur.glowCruise.pathYOffset;
+                            mat.uniforms.uFloorLevel.value = cur.glowCruise.floorLevel;
+                            mat.uniforms.uOrbRadius.value = cur.glowCruise.orbRadius;
+                            mat.uniforms.uMaxSteps.value = cur.glowCruise.maxSteps;
+                            mat.uniforms.uMaxDist.value = cur.glowCruise.maxDist;
+                            mat.uniforms.uStepBase.value = cur.glowCruise.stepBase;
+                            mat.uniforms.uStepMultiplier.value = cur.glowCruise.stepMultiplier;
+                            mat.uniforms.uLightGlowScale.value = cur.glowCruise.lightGlowScale;
+                            mat.uniforms.uWallBrightness.value = cur.glowCruise.wallBrightness;
+                            mat.uniforms.uGlowBrightness.value = cur.glowCruise.glowBrightness;
+                            mat.uniforms.uToneMapDivisor.value = cur.glowCruise.toneMapDivisor;
+                            mat.uniforms.uHue.value = cur.glowCruise.hue;
+                            mat.uniforms.uSaturation.value = cur.glowCruise.saturation;
+                            const [wr, wg, wb] = hexToRgbArray(cur.glowCruise.wallColor);
+                            mat.uniforms.uWallColor.value.set(wr, wg, wb);
+                            const [glr, glg, glb] = hexToRgbArray(cur.glowCruise.glowColor);
+                            mat.uniforms.uGlowColor.value.set(glr, glg, glb);
                         }
                     }
 
@@ -5396,6 +5718,44 @@
                     hue: 0,
                     saturation: 1.0,
                 },
+                glowCruise: {
+                    timeScale: 6.0,
+                    pathFreqX: 0.05,
+                    pathAmpX: 16.0,
+                    pathFreqY: 0.1,
+                    pathAmpY: 8.0,
+                    rollFreq: 0.2,
+                    rollAmp: 0.3,
+                    orbWobbleXFreq: 0.4,
+                    orbWobbleXAmp: 0.4,
+                    orbWobbleYFreq: 0.3,
+                    orbWobbleYAmp: 0.5,
+                    orbZOffset: 5.0,
+                    orbZWobbleFreq: 0.2,
+                    orbZWobbleInner: 0.5,
+                    orbZWobbleAmp: 3.2,
+                    mengerBaseScale: 4.0,
+                    mengerScale1: 1.0,
+                    mengerHole1: 6.0,
+                    mengerScale2: 4.0,
+                    mengerHole2: 3.5,
+                    tunnelSize: 1.0,
+                    pathYOffset: 0.1,
+                    floorLevel: 5.35,
+                    orbRadius: 0.01,
+                    maxSteps: 50.0,
+                    maxDist: 50.0,
+                    stepBase: 0.01,
+                    stepMultiplier: 0.65,
+                    lightGlowScale: 60.0,
+                    wallColor: "#33FF66",
+                    wallBrightness: 10.0,
+                    glowColor: "#4020FF",
+                    glowBrightness: 8.0,
+                    toneMapDivisor: 4e8,
+                    hue: 0,
+                    saturation: 1.0,
+                },
                 blurStrength: 0.0,
                 isFrozen: false,
                 manualTime: 0,
@@ -5567,7 +5927,7 @@
                             </label>
                             <CustomSlider
                                 value={settings.fontSize}
-                                min={12}
+                                min={16}
                                 max={1600}
                                 step={1}
                                 onValueChange={v => handleSlider('fontSize', v)}
@@ -5639,7 +5999,7 @@
                         <div className="space-y-3 pt-4 border-t border-white/10">
                             <StaticSelect
                                 label={t('activeShader')}
-                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi', 'chromaticLight', 'halo', 'chromaticUniverse', 'membranes', 'neonKaleidoscope'].map(v => ({
+                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi', 'chromaticLight', 'halo', 'chromaticUniverse', 'membranes', 'neonKaleidoscope', 'glowCruise'].map(v => ({
                                     value: v,
                                     label: v === 'luminousResin' ? t('luminousResin') : t(v),
                                 }))}
@@ -6890,6 +7250,97 @@
                                         color={settings.neonKaleidoscope.baseColor}
                                         onChange={h => updateNested('neonKaleidoscope', 'baseColor', h)}
                                     />
+                                </div>
+                            </>
+                        )}
+
+                        {/* GLOW CRUISE SHADER */}
+                        {settings.activeShader === 'glowCruise' && (
+                            <>
+                                <ShaderSlider label={t('timeScale')} value={settings.glowCruise.timeScale} min={0} max={20} step={0.1}
+                                    update={v => updateNested('glowCruise', 'timeScale', v)} dir={dir} />
+                                <ShaderSlider label={t('pathFreqX')} value={settings.glowCruise.pathFreqX} min={0} max={0.5} step={0.001}
+                                    update={v => updateNested('glowCruise', 'pathFreqX', v)} dir={dir} />
+                                <ShaderSlider label={t('pathAmpX')} value={settings.glowCruise.pathAmpX} min={0} max={40} step={0.1}
+                                    update={v => updateNested('glowCruise', 'pathAmpX', v)} dir={dir} />
+                                <ShaderSlider label={t('pathFreqY')} value={settings.glowCruise.pathFreqY} min={0} max={0.5} step={0.001}
+                                    update={v => updateNested('glowCruise', 'pathFreqY', v)} dir={dir} />
+                                <ShaderSlider label={t('pathAmpY')} value={settings.glowCruise.pathAmpY} min={0} max={40} step={0.1}
+                                    update={v => updateNested('glowCruise', 'pathAmpY', v)} dir={dir} />
+                                <ShaderSlider label={t('rollFreq')} value={settings.glowCruise.rollFreq} min={0} max={2} step={0.01}
+                                    update={v => updateNested('glowCruise', 'rollFreq', v)} dir={dir} />
+                                <ShaderSlider label={t('rollAmp')} value={settings.glowCruise.rollAmp} min={0} max={2} step={0.01}
+                                    update={v => updateNested('glowCruise', 'rollAmp', v)} dir={dir} />
+                                <ShaderSlider label={t('orbWobbleXFreq')} value={settings.glowCruise.orbWobbleXFreq} min={0} max={2} step={0.01}
+                                    update={v => updateNested('glowCruise', 'orbWobbleXFreq', v)} dir={dir} />
+                                <ShaderSlider label={t('orbWobbleXAmp')} value={settings.glowCruise.orbWobbleXAmp} min={0} max={3} step={0.01}
+                                    update={v => updateNested('glowCruise', 'orbWobbleXAmp', v)} dir={dir} />
+                                <ShaderSlider label={t('orbWobbleYFreq')} value={settings.glowCruise.orbWobbleYFreq} min={0} max={2} step={0.01}
+                                    update={v => updateNested('glowCruise', 'orbWobbleYFreq', v)} dir={dir} />
+                                <ShaderSlider label={t('orbWobbleYAmp')} value={settings.glowCruise.orbWobbleYAmp} min={0} max={3} step={0.01}
+                                    update={v => updateNested('glowCruise', 'orbWobbleYAmp', v)} dir={dir} />
+                                <ShaderSlider label={t('orbZOffset')} value={settings.glowCruise.orbZOffset} min={-10} max={20} step={0.1}
+                                    update={v => updateNested('glowCruise', 'orbZOffset', v)} dir={dir} />
+                                <ShaderSlider label={t('orbZWobbleFreq')} value={settings.glowCruise.orbZWobbleFreq} min={0} max={2} step={0.01}
+                                    update={v => updateNested('glowCruise', 'orbZWobbleFreq', v)} dir={dir} />
+                                <ShaderSlider label={t('orbZWobbleInner')} value={settings.glowCruise.orbZWobbleInner} min={0} max={2} step={0.01}
+                                    update={v => updateNested('glowCruise', 'orbZWobbleInner', v)} dir={dir} />
+                                <ShaderSlider label={t('orbZWobbleAmp')} value={settings.glowCruise.orbZWobbleAmp} min={0} max={10} step={0.1}
+                                    update={v => updateNested('glowCruise', 'orbZWobbleAmp', v)} dir={dir} />
+                                <ShaderSlider label={t('mengerBaseScale')} value={settings.glowCruise.mengerBaseScale} min={0.5} max={10} step={0.1}
+                                    update={v => updateNested('glowCruise', 'mengerBaseScale', v)} dir={dir} />
+                                <ShaderSlider label={t('mengerScale1')} value={settings.glowCruise.mengerScale1} min={0.1} max={10} step={0.1}
+                                    update={v => updateNested('glowCruise', 'mengerScale1', v)} dir={dir} />
+                                <ShaderSlider label={t('mengerHole1')} value={settings.glowCruise.mengerHole1} min={0.5} max={20} step={0.1}
+                                    update={v => updateNested('glowCruise', 'mengerHole1', v)} dir={dir} />
+                                <ShaderSlider label={t('mengerScale2')} value={settings.glowCruise.mengerScale2} min={0.1} max={10} step={0.1}
+                                    update={v => updateNested('glowCruise', 'mengerScale2', v)} dir={dir} />
+                                <ShaderSlider label={t('mengerHole2')} value={settings.glowCruise.mengerHole2} min={0.5} max={20} step={0.1}
+                                    update={v => updateNested('glowCruise', 'mengerHole2', v)} dir={dir} />
+                                <ShaderSlider label={t('tunnelSize')} value={settings.glowCruise.tunnelSize} min={0.1} max={5} step={0.01}
+                                    update={v => updateNested('glowCruise', 'tunnelSize', v)} dir={dir} />
+                                <ShaderSlider label={t('pathYOffset')} value={settings.glowCruise.pathYOffset} min={-2} max={2} step={0.01}
+                                    update={v => updateNested('glowCruise', 'pathYOffset', v)} dir={dir} />
+                                <ShaderSlider label={t('floorLevel')} value={settings.glowCruise.floorLevel} min={0} max={20} step={0.05}
+                                    update={v => updateNested('glowCruise', 'floorLevel', v)} dir={dir} />
+                                <ShaderSlider label={t('orbRadius')} value={settings.glowCruise.orbRadius} min={0} max={1} step={0.001}
+                                    update={v => updateNested('glowCruise', 'orbRadius', v)} dir={dir} />
+                                <ShaderSlider label={t('maxSteps')} value={settings.glowCruise.maxSteps} min={10} max={150} step={1}
+                                    update={v => updateNested('glowCruise', 'maxSteps', v)} dir={dir} />
+                                <ShaderSlider label={t('maxDist')} value={settings.glowCruise.maxDist} min={5} max={150} step={0.5}
+                                    update={v => updateNested('glowCruise', 'maxDist', v)} dir={dir} />
+                                <ShaderSlider label={t('stepBase')} value={settings.glowCruise.stepBase} min={0.001} max={0.1} step={0.001}
+                                    update={v => updateNested('glowCruise', 'stepBase', v)} dir={dir} />
+                                <ShaderSlider label={t('stepMultiplier')} value={settings.glowCruise.stepMultiplier} min={0.1} max={1.5} step={0.01}
+                                    update={v => updateNested('glowCruise', 'stepMultiplier', v)} dir={dir} />
+                                <ShaderSlider label={t('lightGlowScale')} value={settings.glowCruise.lightGlowScale} min={0} max={200} step={1}
+                                    update={v => updateNested('glowCruise', 'lightGlowScale', v)} dir={dir} />
+                                <ShaderSlider label={t('wallBrightness')} value={settings.glowCruise.wallBrightness} min={0} max={30} step={0.1}
+                                    update={v => updateNested('glowCruise', 'wallBrightness', v)} dir={dir} />
+                                <ShaderSlider label={t('glowBrightness')} value={settings.glowCruise.glowBrightness} min={0} max={30} step={0.1}
+                                    update={v => updateNested('glowCruise', 'glowBrightness', v)} dir={dir} />
+                                <ShaderSlider label={t('toneMapDivisor')} value={settings.glowCruise.toneMapDivisor} min={1000000} max={2000000000} step={1000000}
+                                    update={v => updateNested('glowCruise', 'toneMapDivisor', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.glowCruise.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('glowCruise', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.glowCruise.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('glowCruise', 'saturation', v)} dir={dir} />
+
+                                <div className="flex flex-wrap gap-6 mt-4">
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('wallColor')}</span>
+                                        <ColorPicker
+                                            color={settings.glowCruise.wallColor}
+                                            onChange={h => updateNested('glowCruise', 'wallColor', h)}
+                                        />
+                                    </div>
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('glowColor')}</span>
+                                        <ColorPicker
+                                            color={settings.glowCruise.glowColor}
+                                            onChange={h => updateNested('glowCruise', 'glowColor', h)}
+                                        />
+                                    </div>
                                 </div>
                             </>
                         )}
