@@ -1966,6 +1966,407 @@
             },
         ];
 
+        const chromaticUniverseFragShader = `precision highp float;
+
+        uniform vec2 uResolution;
+        uniform float uTime;
+        uniform float uSpeed;
+        uniform float uPathRadius;
+        uniform float uPathFreqX;
+        uniform float uPathFreqY;
+        uniform float uLookAheadDistance;
+        uniform float uMarchSteps;
+        uniform float uMaxDistance;
+        uniform float uOrbSize;
+        uniform float uOrbSwayAmp;
+        uniform float uBaseRadiusAmp;
+        uniform float uBaseRadiusFreq;
+        uniform float uTunnelOffsetX;
+        uniform float uScoopFrequency;
+        uniform float uScoopScale;
+        uniform float uDetailFrequency;
+        uniform float uDetailScale;
+        uniform float uFluidIterations;
+        uniform float uFluidTunnelScale;
+        uniform float uWallBrightness;
+        uniform float uOrbBrightness;
+        uniform float uOrbMinDist;
+        uniform float uToneMapDivisor;
+        uniform float uPaletteBrightness;
+        uniform float uColorIterScale;
+
+        uniform vec4 uColors[10];
+        uniform float uColorCount;
+
+        uniform float uHue;
+        uniform float uSaturation;
+
+        ${hueSatHelpers}
+
+        vec3 cuTanhSafe(vec3 x) {
+            vec3 clamped = clamp(x, vec3(-15.0), vec3(15.0));
+            vec3 e2 = exp(2.0 * clamped);
+            return (e2 - 1.0) / (e2 + 1.0);
+        }
+
+        vec3 paletteColor(float t) {
+            float m = clamp(fract(t), 0.0, 1.0) * uColorCount;
+            vec4 grad = uColors[0];
+            grad.rgb *= grad.a;
+            for (int i = 1; i < 10; i++) {
+                if (float(i) > uColorCount) break;
+                float mm = clamp(m - float(i - 1), 0.0, 1.0);
+                mm = smoothstep(0.0, 1.0, mm);
+                vec4 c = uColors[i - 1];
+                c.rgb *= c.a;
+                grad = mix(grad, c, mm);
+            }
+            return grad.rgb;
+        }
+
+        vec3 getPathPosition(float z) {
+            return vec3(uPathRadius * cos(z * vec2(uPathFreqX, uPathFreqY)), z);
+        }
+
+        void main() {
+            vec2 uv = (gl_FragCoord.xy - uResolution.xy * 0.5) / uResolution.y;
+
+            float animTime = uTime * uSpeed * 4.0 + 5.0 + 5.0 * sin(uTime * uSpeed * 0.3);
+
+            vec3 rayOrigin = getPathPosition(animTime);
+            vec3 lookTarget = getPathPosition(animTime + uLookAheadDistance);
+
+            vec3 forward = normalize(lookTarget - rayOrigin);
+            vec3 right = normalize(vec3(-forward.z, 0.0, forward.x));
+            vec3 up = cross(forward, right);
+            vec3 rayDir = normalize(uv.x * right + uv.y * up + forward);
+
+            float stepDist = 1.0;
+            float totalDist = 0.0;
+            float orbDist = 1.0;
+            vec3 accumulatedColor = vec3(0.0);
+            vec3 rayPos = rayOrigin;
+
+            int steps = int(clamp(uMarchSteps, 1.0, 60.0));
+            for (int idx = 0; idx < 60; idx++) {
+                if (idx >= steps) break;
+                float i = float(idx) + 1.0;
+                if (totalDist >= uMaxDistance) break;
+
+                rayPos += rayDir * stepDist;
+
+                vec3 pathCenter = getPathPosition(rayPos.z);
+                float sineTime = sin(uTime * uSpeed);
+
+                vec3 orbCenter = vec3(
+                    pathCenter.x + sineTime,
+                    pathCenter.y + sineTime * uOrbSwayAmp,
+                    6.0 + animTime + sineTime * uOrbSwayAmp
+                );
+                orbDist = length(rayPos - orbCenter) - uOrbSize;
+
+                float baseRadius = cos(rayPos.z * uBaseRadiusFreq) * uBaseRadiusAmp + 4.0;
+
+                float tunnelStructure = min(
+                    length(rayPos.xy - pathCenter.x - uTunnelOffsetX),
+                    length((rayPos - pathCenter).xy)
+                );
+
+                float largeScoops = abs(dot(sin(uScoopFrequency * rayPos), vec3(uScoopScale))) / 0.1;
+                float detailTexture = abs(dot(sin(animTime + uDetailFrequency * rayPos), vec3(uDetailScale))) / 2.0;
+
+                float carvedDist = baseRadius - tunnelStructure + largeScoops + detailTexture;
+
+                vec3 fluidPos = rayPos;
+                int fIter = int(clamp(uFluidIterations, 1.0, 12.0));
+                for (int jdx = 0; jdx < 12; jdx++) {
+                    if (jdx >= fIter) break;
+                    float j = float(jdx) + 1.0;
+                    fluidPos += sin(fluidPos.yzx * j + uTime * uSpeed + 0.5 * i) / j;
+                }
+
+                float fluidTunnelDist = uFluidTunnelScale * length(vec4(0.3 * cos(fluidPos) - 0.3, carvedDist));
+
+                stepDist = min(orbDist, fluidTunnelDist);
+                totalDist += stepDist;
+
+                vec3 palette = paletteColor(fluidPos.y * 0.15 + i * uColorIterScale) * uPaletteBrightness;
+
+                accumulatedColor += (uWallBrightness * palette / stepDist + uOrbBrightness * palette / max(orbDist, uOrbMinDist)) / i;
+            }
+
+            vec3 col = cuTanhSafe(accumulatedColor * accumulatedColor / uToneMapDivisor);
+
+            vec3 hsv = rgb2hsv(clamp(col, 0.0, 1.0));
+            hsv.x = fract(hsv.x + uHue / 360.0);
+            hsv.y = clamp(hsv.y * uSaturation, 0.0, 1.0);
+            col = hsv2rgb(hsv);
+
+            gl_FragColor = vec4(col, 1.0);
+        }
+        `;
+
+        const membranesFragShader = `precision highp float;
+
+        uniform vec2 uResolution;
+        uniform float uTime;
+        uniform float uSpeed;
+        uniform float uCameraOrbitAmp;
+        uniform float uCameraOrbitFreqX;
+        uniform float uCameraOrbitFreqY;
+        uniform float uLookAheadAmp;
+        uniform float uLookAheadFreq;
+        uniform float uLookAheadDistance;
+        uniform float uFov;
+        uniform float uSpiralAmount;
+        uniform float uWarpAmpX;
+        uniform float uWarpFreqX;
+        uniform float uWarpTimeX;
+        uniform float uWarpAmpY;
+        uniform float uWarpFreqY;
+        uniform float uWarpTimeY;
+        uniform float uGyroidScale;
+        uniform float uRidgeFrequency;
+        uniform float uRidgeZFrequency;
+        uniform float uBaseRadius;
+        uniform float uRidgeAmplitude;
+        uniform float uDistanceScale;
+        uniform float uMarchSteps;
+        uniform float uMaxDepth;
+        uniform float uStepMinMultiplier;
+        uniform float uStepMinFloor;
+        uniform float uCoreThreshold;
+        uniform float uMistIntensity;
+        uniform float uCoreIntensity;
+        uniform float uPulseSpeed;
+        uniform float uPulseZFreq;
+        uniform float uPulseAngleFreq;
+        uniform float uMix1ZFreq;
+        uniform float uMix2Freq;
+        uniform float uDensityFade;
+
+        uniform vec3 uColorBack;
+        uniform vec3 uColor1;
+        uniform vec3 uColor2;
+        uniform vec3 uColor3;
+        uniform vec3 uColor4;
+
+        uniform float uHue;
+        uniform float uSaturation;
+
+        ${hueSatHelpers}
+
+        mat2 mbRot(float a) {
+            float s = sin(a), c = cos(a);
+            return mat2(c, -s, s, c);
+        }
+
+        float mbTime;
+
+        vec2 sceneMap(vec3 p) {
+            vec3 q = p;
+            q.xy *= mbRot(q.z * uSpiralAmount);
+            q.x += sin(q.z * uWarpFreqX + mbTime * uWarpTimeX) * uWarpAmpX;
+            q.y += cos(q.z * uWarpFreqY - mbTime * uWarpTimeY) * uWarpAmpY;
+
+            float scale = uGyroidScale;
+            vec3 q1 = q * scale;
+            vec3 q2 = q.yzx * scale;
+            float g1 = dot(sin(q1), cos(q1.zxy));
+            float g2 = dot(sin(q2), cos(q2.zxy));
+            float angle = atan(g1, g2);
+            float dist = length(vec2(g1, g2));
+
+            float ridges = sin(angle * uRidgeFrequency + q.z * uRidgeZFrequency);
+            float radius = uBaseRadius + uRidgeAmplitude * ridges;
+            float d = (dist - radius) * uDistanceScale;
+            return vec2(d, angle);
+        }
+
+        void main() {
+            mbTime = uTime * uSpeed;
+
+            vec2 uv = (gl_FragCoord.xy * 2.0 - uResolution.xy) / uResolution.y;
+
+            vec3 ro = vec3(sin(mbTime * uCameraOrbitFreqX) * uCameraOrbitAmp, cos(mbTime * uCameraOrbitFreqY) * uCameraOrbitAmp, mbTime * 1.5);
+            vec3 ta = vec3(sin(mbTime * uLookAheadFreq) * uLookAheadAmp, cos(mbTime * uLookAheadFreq) * uLookAheadAmp, ro.z + uLookAheadDistance);
+            vec3 ww = normalize(ta - ro);
+            vec3 uu = normalize(cross(ww, vec3(0.0, 1.0, 0.0)));
+            vec3 vv = normalize(cross(uu, ww));
+            vec3 rd = normalize(uv.x * uu + uv.y * vv + uFov * ww);
+
+            vec3 finalColor = vec3(0.0);
+            float t = 0.0;
+
+            int steps = int(clamp(uMarchSteps, 1.0, 200.0));
+            for (int i = 0; i < 200; i++) {
+                if (i >= steps) break;
+                vec3 p = ro + rd * t;
+
+                vec2 obj = sceneMap(p);
+                float d = obj.x;
+                float angle = obj.y;
+
+                if (d < uCoreThreshold) {
+                    float core = smoothstep(0.02, 0.0, d);
+                    float mist = smoothstep(uCoreThreshold, 0.0, d) * uMistIntensity;
+
+                    float matPulse = sin(p.z * uPulseZFreq + angle * uPulseAngleFreq - mbTime * uPulseSpeed);
+                    float pulse = smoothstep(-0.2, 0.8, matPulse);
+
+                    float mix1 = sin(p.z * uMix1ZFreq + angle) * 0.5 + 0.5;
+                    float mix2 = cos(p.x * uMix2Freq - p.y * uMix2Freq) * 0.5 + 0.5;
+
+                    vec3 baseColor = mix(mix(uColor1, uColor2, mix1), mix(uColor3, uColor4, mix1), mix2);
+                    vec3 emission = baseColor;
+                    float density = (core * uCoreIntensity + mist) * pulse;
+                    float fade = smoothstep(uMaxDepth, 0.0, t);
+                    finalColor += emission * density * fade * uDensityFade;
+                }
+                t += max(d * uStepMinMultiplier, uStepMinFloor);
+                if (t > uMaxDepth) break;
+            }
+
+            float maxCol = max(finalColor.r, max(finalColor.g, finalColor.b));
+            if (maxCol > 1.0) finalColor /= maxCol;
+
+            finalColor = finalColor * finalColor * (3.0 - 2.0 * finalColor);
+            finalColor = pow(finalColor, vec3(0.8));
+
+            vec3 col = clamp(finalColor, 0.0, 1.0) + uColorBack;
+
+            vec3 hsv = rgb2hsv(clamp(col, 0.0, 1.0));
+            hsv.x = fract(hsv.x + uHue / 360.0);
+            hsv.y = clamp(hsv.y * uSaturation, 0.0, 1.0);
+            col = hsv2rgb(hsv);
+
+            gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+        }
+        `;
+
+        const neonKaleidoscopeFragShader = `precision highp float;
+        precision highp int;
+
+        uniform vec2 uResolution;
+        uniform float uTime;
+        uniform float uSpeed;
+
+        uniform float uIterationCount;
+
+        uniform float uCellScale;
+        uniform float uFormRadius;
+        uniform float uFormAngularity;
+        uniform float uCornerWeight;
+
+        uniform float uFacetCount;
+        uniform float uFacetSmoothness;
+        uniform float uFacetSpin;
+
+        uniform float uBandFrequency;
+        uniform float uBandDivisor;
+
+        uniform float uColorRate;
+        uniform float uPhaseRate;
+        uniform float uLayerShift;
+
+        uniform float uLightWidth;
+        uniform float uLightPower;
+
+        uniform vec4 uBaseColor;
+
+        uniform float uHue;
+        uniform float uSaturation;
+
+        #define MAX_ITERATIONS 12
+        #define PI 3.14159265359
+        #define TAU 6.28318530718
+        const float MIN_DISTANCE = 0.0001;
+
+        ${hueSatHelpers}
+
+        vec2 kaleidoscopeFold(vec2 p, float facets, float smoothing) {
+            float n = max(facets, 1.0);
+            float angle = atan(p.y, p.x);
+            float radius = length(p);
+            float wedge = TAU / n;
+            float halfWedge = wedge * 0.5;
+
+            float a = mod(angle + halfWedge, wedge) - halfWedge;
+            float sm = max(smoothing, 0.0001);
+            a = sign(a) * (halfWedge - (halfWedge - abs(a)));
+            a = mix(a, sign(a) * abs(a), 1.0 - sm);
+
+            return radius * vec2(cos(a), sin(a));
+        }
+
+        float angularMetric(vec2 p) {
+            vec2 a = abs(p);
+            float rounded = length(a);
+            float faceted = (a.x + a.y) * uCornerWeight;
+            return mix(rounded, faceted, uFormAngularity);
+        }
+
+        float shapeField(vec2 p) {
+            return angularMetric(p) - uFormRadius;
+        }
+
+        vec2 nextCell(vec2 p) {
+            return fract(p * uCellScale) - 0.5;
+        }
+
+        float luminousBand(float fieldValue, float timePhase) {
+            float wave = sin(fieldValue * uBandFrequency - timePhase) / uBandDivisor;
+            float distanceToBand = max(abs(wave), MIN_DISTANCE);
+            return pow(uLightWidth / distanceToBand, uLightPower);
+        }
+
+        void main() {
+            vec2 fragCoord = gl_FragCoord.xy;
+            vec2 screen = (2.0 * fragCoord - uResolution.xy) / uResolution.y;
+
+            float sceneTime = uTime * uSpeed;
+
+            float spin = sceneTime * uFacetSpin;
+            vec2 spun = vec2(
+                screen.x * cos(spin) - screen.y * sin(spin),
+                screen.x * sin(spin) + screen.y * cos(spin)
+            );
+            vec2 domain = kaleidoscopeFold(spun, uFacetCount, uFacetSmoothness);
+
+            float radialDistance = length(screen);
+            float radialFalloff = exp(-radialDistance);
+
+            vec3 radiance = vec3(0.0);
+            vec3 baseRgb = uBaseColor.rgb * uBaseColor.a;
+
+            int iterations = int(clamp(uIterationCount, 1.0, float(MAX_ITERATIONS)));
+            for (int layer = 0; layer < MAX_ITERATIONS; ++layer) {
+                if (layer >= iterations) break;
+
+                float index = float(layer);
+                domain = nextCell(domain);
+
+                float geometryField = shapeField(domain) * radialFalloff;
+
+                float depthShade = 0.6 + 0.4 * sin(index * uLayerShift + sceneTime * uColorRate);
+                vec3 tint = baseRgb * depthShade;
+
+                float intensity = luminousBand(geometryField, sceneTime * uPhaseRate);
+
+                radiance += tint * intensity;
+            }
+
+            vec3 col = radiance;
+
+            vec3 hsv = rgb2hsv(clamp(col, 0.0, 1.0));
+            hsv.x = fract(hsv.x + uHue / 360.0);
+            hsv.y = clamp(hsv.y * uSaturation, 0.0, 1.0);
+            col = hsv2rgb(hsv);
+
+            gl_FragColor = vec4(col, 1.0);
+        }
+        `;
+
         // =========================================================================
         // LOCALIZATION
         // =========================================================================
@@ -2055,6 +2456,32 @@
                 fieldSlope: "Field Slope", fieldDetailScale: "Field Detail Scale",
                 distanceBase: "Distance Base", distanceDepthFactor: "Distance Depth Factor",
                 safeMinimum: "Safe Minimum", exposureScale: "Exposure Scale",
+                chromaticUniverse: "Chromatic Universe", membranes: "Membranes", neonKaleidoscope: "Neon Kaleidoscope",
+                pathRadius: "Path Radius", pathFreqX: "Path Frequency X", pathFreqY: "Path Frequency Y",
+                lookAheadDistance: "Look Ahead Distance", marchSteps: "March Steps", maxDistance: "Max Distance",
+                orbSize: "Orb Size", orbSwayAmp: "Orb Sway Amount",
+                baseRadiusAmp: "Base Radius Amount", baseRadiusFreq: "Base Radius Frequency", tunnelOffsetX: "Tunnel Offset X",
+                scoopFrequency: "Scoop Frequency", scoopScale: "Scoop Scale",
+                detailFrequency: "Detail Frequency", detailScale: "Detail Scale",
+                fluidIterations: "Fluid Iterations", fluidTunnelScale: "Fluid Tunnel Scale",
+                wallBrightness: "Wall Brightness", orbBrightness: "Orb Brightness", orbMinDist: "Orb Min Distance",
+                toneMapDivisor: "Tone Map Divisor", paletteBrightness: "Palette Brightness", colorIterScale: "Color Iteration Scale",
+                cameraOrbitAmp: "Camera Orbit Amount", cameraOrbitFreqX: "Camera Orbit Frequency X", cameraOrbitFreqY: "Camera Orbit Frequency Y",
+                lookAheadAmp: "Look Ahead Amount", lookAheadFreq: "Look Ahead Frequency", fov: "Field of View",
+                spiralAmount: "Spiral Amount", warpAmpX: "Warp Amount X", warpFreqX: "Warp Frequency X", warpTimeX: "Warp Time X",
+                warpAmpY: "Warp Amount Y", warpFreqY: "Warp Frequency Y", warpTimeY: "Warp Time Y",
+                gyroidScale: "Gyroid Scale", ridgeFrequency: "Ridge Frequency", ridgeZFrequency: "Ridge Z Frequency",
+                baseRadius: "Base Radius", ridgeAmplitude: "Ridge Amplitude", distanceScale: "Distance Scale",
+                maxDepth: "Max Depth", stepMinMultiplier: "Step Min Multiplier", stepMinFloor: "Step Min Floor",
+                coreThreshold: "Core Threshold", mistIntensity: "Mist Intensity", coreIntensity: "Core Intensity",
+                pulseSpeed: "Pulse Speed", pulseZFreq: "Pulse Z Frequency", pulseAngleFreq: "Pulse Angle Frequency",
+                mix1ZFreq: "Mix 1 Z Frequency", mix2Freq: "Mix 2 Frequency", densityFade: "Density Fade",
+                iterationCount: "Iteration Count", cellScale: "Cell Scale", formRadius: "Form Radius",
+                formAngularity: "Form Angularity", cornerWeight: "Corner Weight",
+                facetCount: "Facet Count", facetSmoothness: "Facet Smoothness", facetSpin: "Facet Spin",
+                colorRate: "Color Rate", phaseRate: "Phase Rate", layerShift: "Layer Shift",
+                bandFrequency: "Band Frequency", bandDivisor: "Band Divisor",
+                lightWidth: "Light Width", lightPower: "Light Power",
             },
             he: {
                 appName: "קרח Go",
@@ -2138,6 +2565,32 @@
                 fieldSlope: "שיפוע שדה", fieldDetailScale: "קנה מידת פירוט שדה",
                 distanceBase: "בסיס מרחק", distanceDepthFactor: "מקדם עומק מרחק",
                 safeMinimum: "מינימום בטוח", exposureScale: "קנה מידת חשיפה",
+                chromaticUniverse: "יקום כרומטי", membranes: "ממברנות", neonKaleidoscope: "קליידוסקופ ניאון",
+                pathRadius: "רדיוס מסלול", pathFreqX: "תדירות מסלול X", pathFreqY: "תדירות מסלול Y",
+                lookAheadDistance: "מרחק הסתכלות קדימה", marchSteps: "צעדי מארש", maxDistance: "מרחק מרבי",
+                orbSize: "גודל כדור", orbSwayAmp: "עוצמת תנודת כדור",
+                baseRadiusAmp: "עוצמת רדיוס בסיס", baseRadiusFreq: "תדירות רדיוס בסיס", tunnelOffsetX: "היסט מנהרה X",
+                scoopFrequency: "תדירות חריטה", scoopScale: "קנה מידת חריטה",
+                detailFrequency: "תדירות פירוט", detailScale: "קנה מידת פירוט",
+                fluidIterations: "איטרציות נוזל", fluidTunnelScale: "קנה מידת מנהרת נוזל",
+                wallBrightness: "בהירות קיר", orbBrightness: "בהירות כדור", orbMinDist: "מרחק מינימלי לכדור",
+                toneMapDivisor: "מחלק מיפוי גוונים", paletteBrightness: "בהירות פלטה", colorIterScale: "קנה מידת איטרציית צבע",
+                cameraOrbitAmp: "עוצמת סיבוב מצלמה", cameraOrbitFreqX: "תדירות סיבוב מצלמה X", cameraOrbitFreqY: "תדירות סיבוב מצלמה Y",
+                lookAheadAmp: "עוצמת הסתכלות קדימה", lookAheadFreq: "תדירות הסתכלות קדימה", fov: "שדה ראייה",
+                spiralAmount: "כמות ספירלה", warpAmpX: "עוצמת עיוות X", warpFreqX: "תדירות עיוות X", warpTimeX: "זמן עיוות X",
+                warpAmpY: "עוצמת עיוות Y", warpFreqY: "תדירות עיוות Y", warpTimeY: "זמן עיוות Y",
+                gyroidScale: "קנה מידת גיירואיד", ridgeFrequency: "תדירות רכס", ridgeZFrequency: "תדירות רכס Z",
+                baseRadius: "רדיוס בסיס", ridgeAmplitude: "משרעת רכס", distanceScale: "קנה מידת מרחק",
+                maxDepth: "עומק מרבי", stepMinMultiplier: "מכפיל צעד מינימלי", stepMinFloor: "רצפת צעד מינימלי",
+                coreThreshold: "סף ליבה", mistIntensity: "עוצמת ערפל", coreIntensity: "עוצמת ליבה",
+                pulseSpeed: "מהירות פעימה", pulseZFreq: "תדירות פעימה Z", pulseAngleFreq: "תדירות פעימת זווית",
+                mix1ZFreq: "תדירות מיזוג 1 Z", mix2Freq: "תדירות מיזוג 2", densityFade: "דעיכת צפיפות",
+                iterationCount: "מספר איטרציות", cellScale: "קנה מידת תא", formRadius: "רדיוס צורה",
+                formAngularity: "זוויתיות צורה", cornerWeight: "משקל פינה",
+                facetCount: "מספר פאונים", facetSmoothness: "חלקות פאונים", facetSpin: "סיבוב פאונים",
+                colorRate: "קצב צבע", phaseRate: "קצב פאזה", layerShift: "היסט שכבה",
+                bandFrequency: "תדירות רצועה", bandDivisor: "מחלק רצועה",
+                lightWidth: "רוחב אור", lightPower: "עוצמת אור",
             },
             it: {
                 appName: "Kerach Go",
@@ -2221,6 +2674,32 @@
                 fieldSlope: "Pendenza Campo", fieldDetailScale: "Scala Dettaglio Campo",
                 distanceBase: "Base Distanza", distanceDepthFactor: "Fattore Profondità Distanza",
                 safeMinimum: "Minimo di Sicurezza", exposureScale: "Scala Esposizione",
+                chromaticUniverse: "Universo Cromatico", membranes: "Membrane", neonKaleidoscope: "Caleidoscopio al Neon",
+                pathRadius: "Raggio del Percorso", pathFreqX: "Frequenza Percorso X", pathFreqY: "Frequenza Percorso Y",
+                lookAheadDistance: "Distanza di Anticipo", marchSteps: "Passi di Marcia", maxDistance: "Distanza Massima",
+                orbSize: "Dimensione Sfera", orbSwayAmp: "Ampiezza Oscillazione Sfera",
+                baseRadiusAmp: "Ampiezza Raggio Base", baseRadiusFreq: "Frequenza Raggio Base", tunnelOffsetX: "Offset Tunnel X",
+                scoopFrequency: "Frequenza Scavo", scoopScale: "Scala Scavo",
+                detailFrequency: "Frequenza Dettaglio", detailScale: "Scala Dettaglio",
+                fluidIterations: "Iterazioni Fluido", fluidTunnelScale: "Scala Tunnel Fluido",
+                wallBrightness: "Luminosità Parete", orbBrightness: "Luminosità Sfera", orbMinDist: "Distanza Minima Sfera",
+                toneMapDivisor: "Divisore Mappatura Toni", paletteBrightness: "Luminosità Tavolozza", colorIterScale: "Scala Iterazione Colore",
+                cameraOrbitAmp: "Ampiezza Orbita Camera", cameraOrbitFreqX: "Frequenza Orbita Camera X", cameraOrbitFreqY: "Frequenza Orbita Camera Y",
+                lookAheadAmp: "Ampiezza Anticipo", lookAheadFreq: "Frequenza Anticipo", fov: "Campo Visivo",
+                spiralAmount: "Quantità Spirale", warpAmpX: "Ampiezza Distorsione X", warpFreqX: "Frequenza Distorsione X", warpTimeX: "Tempo Distorsione X",
+                warpAmpY: "Ampiezza Distorsione Y", warpFreqY: "Frequenza Distorsione Y", warpTimeY: "Tempo Distorsione Y",
+                gyroidScale: "Scala Giroide", ridgeFrequency: "Frequenza Cresta", ridgeZFrequency: "Frequenza Cresta Z",
+                baseRadius: "Raggio Base", ridgeAmplitude: "Ampiezza Cresta", distanceScale: "Scala Distanza",
+                maxDepth: "Profondità Massima", stepMinMultiplier: "Moltiplicatore Passo Minimo", stepMinFloor: "Soglia Passo Minimo",
+                coreThreshold: "Soglia Nucleo", mistIntensity: "Intensità Foschia", coreIntensity: "Intensità Nucleo",
+                pulseSpeed: "Velocità Impulso", pulseZFreq: "Frequenza Impulso Z", pulseAngleFreq: "Frequenza Impulso Angolare",
+                mix1ZFreq: "Frequenza Mix 1 Z", mix2Freq: "Frequenza Mix 2", densityFade: "Dissolvenza Densità",
+                iterationCount: "Numero Iterazioni", cellScale: "Scala Cella", formRadius: "Raggio Forma",
+                formAngularity: "Angolarità Forma", cornerWeight: "Peso Angolo",
+                facetCount: "Numero Sfaccettature", facetSmoothness: "Levigatura Sfaccettature", facetSpin: "Rotazione Sfaccettature",
+                colorRate: "Velocità Colore", phaseRate: "Velocità Fase", layerShift: "Spostamento Livello",
+                bandFrequency: "Frequenza Banda", bandDivisor: "Divisore Banda",
+                lightWidth: "Larghezza Luce", lightPower: "Potenza Luce",
             },
             es: {
                 appName: "Kerach Go",
@@ -2304,6 +2783,32 @@
                 fieldSlope: "Pendiente de Campo", fieldDetailScale: "Escala de Detalle de Campo",
                 distanceBase: "Base de Distancia", distanceDepthFactor: "Factor de Profundidad de Distancia",
                 safeMinimum: "Mínimo Seguro", exposureScale: "Escala de Exposición",
+                chromaticUniverse: "Universo Cromático", membranes: "Membranas", neonKaleidoscope: "Caleidoscopio de Neón",
+                pathRadius: "Radio de la Trayectoria", pathFreqX: "Frecuencia de Trayectoria X", pathFreqY: "Frecuencia de Trayectoria Y",
+                lookAheadDistance: "Distancia de Anticipación", marchSteps: "Pasos de Marcha", maxDistance: "Distancia Máxima",
+                orbSize: "Tamaño de Orbe", orbSwayAmp: "Amplitud de Balanceo del Orbe",
+                baseRadiusAmp: "Amplitud de Radio Base", baseRadiusFreq: "Frecuencia de Radio Base", tunnelOffsetX: "Desplazamiento de Túnel X",
+                scoopFrequency: "Frecuencia de Excavado", scoopScale: "Escala de Excavado",
+                detailFrequency: "Frecuencia de Detalle", detailScale: "Escala de Detalle",
+                fluidIterations: "Iteraciones de Fluido", fluidTunnelScale: "Escala de Túnel de Fluido",
+                wallBrightness: "Brillo de Pared", orbBrightness: "Brillo del Orbe", orbMinDist: "Distancia Mínima del Orbe",
+                toneMapDivisor: "Divisor de Mapeo de Tonos", paletteBrightness: "Brillo de Paleta", colorIterScale: "Escala de Iteración de Color",
+                cameraOrbitAmp: "Amplitud de Órbita de Cámara", cameraOrbitFreqX: "Frecuencia de Órbita de Cámara X", cameraOrbitFreqY: "Frecuencia de Órbita de Cámara Y",
+                lookAheadAmp: "Amplitud de Anticipación", lookAheadFreq: "Frecuencia de Anticipación", fov: "Campo de Visión",
+                spiralAmount: "Cantidad de Espiral", warpAmpX: "Amplitud de Distorsión X", warpFreqX: "Frecuencia de Distorsión X", warpTimeX: "Tiempo de Distorsión X",
+                warpAmpY: "Amplitud de Distorsión Y", warpFreqY: "Frecuencia de Distorsión Y", warpTimeY: "Tiempo de Distorsión Y",
+                gyroidScale: "Escala de Giroide", ridgeFrequency: "Frecuencia de Cresta", ridgeZFrequency: "Frecuencia de Cresta Z",
+                baseRadius: "Radio Base", ridgeAmplitude: "Amplitud de Cresta", distanceScale: "Escala de Distancia",
+                maxDepth: "Profundidad Máxima", stepMinMultiplier: "Multiplicador de Paso Mínimo", stepMinFloor: "Piso de Paso Mínimo",
+                coreThreshold: "Umbral del Núcleo", mistIntensity: "Intensidad de Neblina", coreIntensity: "Intensidad del Núcleo",
+                pulseSpeed: "Velocidad de Pulso", pulseZFreq: "Frecuencia de Pulso Z", pulseAngleFreq: "Frecuencia de Pulso Angular",
+                mix1ZFreq: "Frecuencia de Mezcla 1 Z", mix2Freq: "Frecuencia de Mezcla 2", densityFade: "Desvanecimiento de Densidad",
+                iterationCount: "Número de Iteraciones", cellScale: "Escala de Celda", formRadius: "Radio de Forma",
+                formAngularity: "Angularidad de Forma", cornerWeight: "Peso de Esquina",
+                facetCount: "Número de Facetas", facetSmoothness: "Suavidad de Facetas", facetSpin: "Giro de Facetas",
+                colorRate: "Velocidad de Color", phaseRate: "Velocidad de Fase", layerShift: "Desplazamiento de Capa",
+                bandFrequency: "Frecuencia de Banda", bandDivisor: "Divisor de Banda",
+                lightWidth: "Ancho de Luz", lightPower: "Potencia de Luz",
             },
             pt: {
                 appName: "Kerach Go",
@@ -2387,6 +2892,32 @@
                 fieldSlope: "Inclinação do Campo", fieldDetailScale: "Escala de Detalhe do Campo",
                 distanceBase: "Base de Distância", distanceDepthFactor: "Fator de Profundidade da Distância",
                 safeMinimum: "Mínimo Seguro", exposureScale: "Escala de Exposição",
+                chromaticUniverse: "Universo Cromático", membranes: "Membranas", neonKaleidoscope: "Caleidoscópio de Néon",
+                pathRadius: "Raio da Trajetória", pathFreqX: "Frequência de Trajetória X", pathFreqY: "Frequência de Trajetória Y",
+                lookAheadDistance: "Distância de Antecipação", marchSteps: "Passos de Marcha", maxDistance: "Distância Máxima",
+                orbSize: "Tamanho do Orbe", orbSwayAmp: "Amplitude de Balanço do Orbe",
+                baseRadiusAmp: "Amplitude do Raio Base", baseRadiusFreq: "Frequência do Raio Base", tunnelOffsetX: "Deslocamento do Túnel X",
+                scoopFrequency: "Frequência de Escavação", scoopScale: "Escala de Escavação",
+                detailFrequency: "Frequência de Detalhe", detailScale: "Escala de Detalhe",
+                fluidIterations: "Iterações de Fluido", fluidTunnelScale: "Escala do Túnel de Fluido",
+                wallBrightness: "Brilho da Parede", orbBrightness: "Brilho do Orbe", orbMinDist: "Distância Mínima do Orbe",
+                toneMapDivisor: "Divisor de Mapeamento de Tons", paletteBrightness: "Brilho da Paleta", colorIterScale: "Escala de Iteração de Cor",
+                cameraOrbitAmp: "Amplitude de Órbita da Câmera", cameraOrbitFreqX: "Frequência de Órbita da Câmera X", cameraOrbitFreqY: "Frequência de Órbita da Câmera Y",
+                lookAheadAmp: "Amplitude de Antecipação", lookAheadFreq: "Frequência de Antecipação", fov: "Campo de Visão",
+                spiralAmount: "Quantidade de Espiral", warpAmpX: "Amplitude de Distorção X", warpFreqX: "Frequência de Distorção X", warpTimeX: "Tempo de Distorção X",
+                warpAmpY: "Amplitude de Distorção Y", warpFreqY: "Frequência de Distorção Y", warpTimeY: "Tempo de Distorção Y",
+                gyroidScale: "Escala de Giroide", ridgeFrequency: "Frequência de Crista", ridgeZFrequency: "Frequência de Crista Z",
+                baseRadius: "Raio Base", ridgeAmplitude: "Amplitude de Crista", distanceScale: "Escala de Distância",
+                maxDepth: "Profundidade Máxima", stepMinMultiplier: "Multiplicador de Passo Mínimo", stepMinFloor: "Piso de Passo Mínimo",
+                coreThreshold: "Limiar do Núcleo", mistIntensity: "Intensidade de Neblina", coreIntensity: "Intensidade do Núcleo",
+                pulseSpeed: "Velocidade de Pulso", pulseZFreq: "Frequência de Pulso Z", pulseAngleFreq: "Frequência de Pulso Angular",
+                mix1ZFreq: "Frequência de Mistura 1 Z", mix2Freq: "Frequência de Mistura 2", densityFade: "Esmaecimento de Densidade",
+                iterationCount: "Número de Iterações", cellScale: "Escala de Célula", formRadius: "Raio da Forma",
+                formAngularity: "Angularidade da Forma", cornerWeight: "Peso de Canto",
+                facetCount: "Número de Facetas", facetSmoothness: "Suavidade das Facetas", facetSpin: "Giro das Facetas",
+                colorRate: "Velocidade de Cor", phaseRate: "Velocidade de Fase", layerShift: "Deslocamento de Camada",
+                bandFrequency: "Frequência de Faixa", bandDivisor: "Divisor de Faixa",
+                lightWidth: "Largura da Luz", lightPower: "Potência da Luz",
             },
             ja: {
                 appName: "Kerach Go", controls: "コントロール", shader: "シェーダー", palette: "パレット", mix: "ミックス",
@@ -2468,6 +2999,32 @@
                 fieldSlope: "フィールド傾斜", fieldDetailScale: "フィールド詳細スケール",
                 distanceBase: "距離ベース", distanceDepthFactor: "距離深度係数",
                 safeMinimum: "安全最小値", exposureScale: "露出スケール",
+                chromaticUniverse: "クロマティックユニバース", membranes: "メンブレン", neonKaleidoscope: "ネオンカレイドスコープ",
+                pathRadius: "パス半径", pathFreqX: "パス周波数X", pathFreqY: "パス周波数Y",
+                lookAheadDistance: "先読み距離", marchSteps: "マーチステップ数", maxDistance: "最大距離",
+                orbSize: "オーブサイズ", orbSwayAmp: "オーブ揺れ幅",
+                baseRadiusAmp: "基本半径振幅", baseRadiusFreq: "基本半径周波数", tunnelOffsetX: "トンネルオフセットX",
+                scoopFrequency: "彫り込み周波数", scoopScale: "彫り込みスケール",
+                detailFrequency: "ディテール周波数", detailScale: "ディテールスケール",
+                fluidIterations: "流体反復回数", fluidTunnelScale: "流体トンネルスケール",
+                wallBrightness: "壁の明るさ", orbBrightness: "オーブの明るさ", orbMinDist: "オーブ最小距離",
+                toneMapDivisor: "トーンマップ除数", paletteBrightness: "パレットの明るさ", colorIterScale: "色反復スケール",
+                cameraOrbitAmp: "カメラ軌道振幅", cameraOrbitFreqX: "カメラ軌道周波数X", cameraOrbitFreqY: "カメラ軌道周波数Y",
+                lookAheadAmp: "先読み振幅", lookAheadFreq: "先読み周波数", fov: "視野角",
+                spiralAmount: "スパイラル量", warpAmpX: "ワープ振幅X", warpFreqX: "ワープ周波数X", warpTimeX: "ワープ時間X",
+                warpAmpY: "ワープ振幅Y", warpFreqY: "ワープ周波数Y", warpTimeY: "ワープ時間Y",
+                gyroidScale: "ジャイロイドスケール", ridgeFrequency: "尾根周波数", ridgeZFrequency: "尾根Z周波数",
+                baseRadius: "基本半径", ridgeAmplitude: "尾根振幅", distanceScale: "距離スケール",
+                maxDepth: "最大深度", stepMinMultiplier: "最小ステップ乗数", stepMinFloor: "最小ステップ下限",
+                coreThreshold: "コア閾値", mistIntensity: "霧の強度", coreIntensity: "コア強度",
+                pulseSpeed: "パルス速度", pulseZFreq: "パルスZ周波数", pulseAngleFreq: "パルス角度周波数",
+                mix1ZFreq: "ミックス1 Z周波数", mix2Freq: "ミックス2周波数", densityFade: "密度フェード",
+                iterationCount: "反復回数", cellScale: "セルスケール", formRadius: "形状半径",
+                formAngularity: "形状の角度", cornerWeight: "角の重み",
+                facetCount: "ファセット数", facetSmoothness: "ファセットの滑らかさ", facetSpin: "ファセットスピン",
+                colorRate: "色変化率", phaseRate: "位相変化率", layerShift: "レイヤーシフト",
+                bandFrequency: "バンド周波数", bandDivisor: "バンド除数",
+                lightWidth: "光の幅", lightPower: "光の強さ",
             },
             yue: {
                 appName: "Kerach Go", controls: "控制", shader: "着色器", palette: "調色盤", mix: "混合",
@@ -2547,6 +3104,32 @@
                 fieldSlope: "場斜率", fieldDetailScale: "場細節比例",
                 distanceBase: "距離基數", distanceDepthFactor: "距離深度係數",
                 safeMinimum: "安全最小值", exposureScale: "曝光比例",
+                chromaticUniverse: "色彩宇宙", membranes: "薄膜", neonKaleidoscope: "霓虹萬花筒",
+                pathRadius: "路徑半徑", pathFreqX: "路徑頻率X", pathFreqY: "路徑頻率Y",
+                lookAheadDistance: "前瞻距離", marchSteps: "步進次數", maxDistance: "最大距離",
+                orbSize: "光球大小", orbSwayAmp: "光球擺動幅度",
+                baseRadiusAmp: "基礎半徑幅度", baseRadiusFreq: "基礎半徑頻率", tunnelOffsetX: "隧道偏移X",
+                scoopFrequency: "挖鑿頻率", scoopScale: "挖鑿比例",
+                detailFrequency: "細節頻率", detailScale: "細節比例",
+                fluidIterations: "流體疊代次數", fluidTunnelScale: "流體隧道比例",
+                wallBrightness: "牆壁亮度", orbBrightness: "光球亮度", orbMinDist: "光球最小距離",
+                toneMapDivisor: "色調映射除數", paletteBrightness: "調色板亮度", colorIterScale: "顏色疊代比例",
+                cameraOrbitAmp: "相機軌道幅度", cameraOrbitFreqX: "相機軌道頻率X", cameraOrbitFreqY: "相機軌道頻率Y",
+                lookAheadAmp: "前瞻幅度", lookAheadFreq: "前瞻頻率", fov: "視野",
+                spiralAmount: "螺旋量", warpAmpX: "扭曲幅度X", warpFreqX: "扭曲頻率X", warpTimeX: "扭曲時間X",
+                warpAmpY: "扭曲幅度Y", warpFreqY: "扭曲頻率Y", warpTimeY: "扭曲時間Y",
+                gyroidScale: "螺旋面比例", ridgeFrequency: "稜脊頻率", ridgeZFrequency: "稜脊Z頻率",
+                baseRadius: "基礎半徑", ridgeAmplitude: "稜脊振幅", distanceScale: "距離比例",
+                maxDepth: "最大深度", stepMinMultiplier: "最小步進乘數", stepMinFloor: "最小步進下限",
+                coreThreshold: "核心閾值", mistIntensity: "霧氣強度", coreIntensity: "核心強度",
+                pulseSpeed: "脈衝速度", pulseZFreq: "脈衝Z頻率", pulseAngleFreq: "脈衝角度頻率",
+                mix1ZFreq: "混合1 Z頻率", mix2Freq: "混合2頻率", densityFade: "密度衰減",
+                iterationCount: "疊代次數", cellScale: "單元比例", formRadius: "形狀半徑",
+                formAngularity: "形狀角度感", cornerWeight: "角落權重",
+                facetCount: "刻面數量", facetSmoothness: "刻面平滑度", facetSpin: "刻面旋轉",
+                colorRate: "顏色速率", phaseRate: "相位速率", layerShift: "層偏移",
+                bandFrequency: "條帶頻率", bandDivisor: "條帶除數",
+                lightWidth: "光寬度", lightPower: "光強度",
             }
         };
 
@@ -3191,6 +3774,9 @@
 [Voronoi - distances](https://www.shadertoy.com/view/ldl3W8) by [iq](https://www.shadertoy.com/user/iq)
 [Abstract Chromatic Light](https://codepen.io/editor/sabosugi/pen/019fa4fd-6341-7983-b8f4-81dff70f7e62) by [Sabo Sugi](https://codepen.io/sabosugi)
 [Enter to Other Dimension](https://codepen.io/editor/sabosugi/pen/019fa3cf-2f37-771c-8735-81f31d1e7e0e) by [Sabo Sugi](https://codepen.io/sabosugi)
+[Rainbow Travel](https://www.shadertoy.com/view/f3XGWS) by [noztol](https://www.shadertoy.com/user/noztol)
+[Formless](https://www.shadertoy.com/view/Ncy3R3) by [noztol](https://www.shadertoy.com/user/noztol)
+[Neon Kaleidoscope](https://codepen.io/editor/sabosugi/pen/01a02f92-c5a4-7680-9919-88d6778ba369) by [Sabo Sugi](https://codepen.io/sabosugi)
         `;
 
         function CreditHighlightHover({ children, href, className }) {
@@ -3896,6 +4482,108 @@
                         uExposureScale: { value: 2000.0 },
                         uBackgroundColor: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
                     });
+                } else if (type === 'chromaticUniverse') {
+                    baseFragment = chromaticUniverseFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 1.0 },
+                        uPathRadius: { value: 12.0 },
+                        uPathFreqX: { value: 0.1 },
+                        uPathFreqY: { value: 0.12 },
+                        uLookAheadDistance: { value: 4.0 },
+                        uMarchSteps: { value: 28.0 },
+                        uMaxDistance: { value: 30.0 },
+                        uOrbSize: { value: 0.01 },
+                        uOrbSwayAmp: { value: 2.0 },
+                        uBaseRadiusAmp: { value: 2.0 },
+                        uBaseRadiusFreq: { value: 0.6 },
+                        uTunnelOffsetX: { value: 6.0 },
+                        uScoopFrequency: { value: 0.4 },
+                        uScoopScale: { value: 0.25 },
+                        uDetailFrequency: { value: 16.0 },
+                        uDetailScale: { value: 0.22 },
+                        uFluidIterations: { value: 7.0 },
+                        uFluidTunnelScale: { value: 0.4 },
+                        uWallBrightness: { value: 2.5 },
+                        uOrbBrightness: { value: 10.0 },
+                        uOrbMinDist: { value: 0.6 },
+                        uToneMapDivisor: { value: 1500.0 },
+                        uPaletteBrightness: { value: 2.0 },
+                        uColorIterScale: { value: 0.4 },
+                        uColorCount: { value: 9 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                        uColors: {
+                            value: Array.from({ length: 10 }, () => new THREE.Vector4(0.0, 0.0, 0.0, 1.0))
+                        },
+                    });
+                } else if (type === 'membranes') {
+                    baseFragment = membranesFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 1.0 },
+                        uCameraOrbitAmp: { value: 0.8 },
+                        uCameraOrbitFreqX: { value: 0.2 },
+                        uCameraOrbitFreqY: { value: 0.15 },
+                        uLookAheadAmp: { value: 0.4 },
+                        uLookAheadFreq: { value: 0.1 },
+                        uLookAheadDistance: { value: 4.0 },
+                        uFov: { value: 1.2 },
+                        uSpiralAmount: { value: 0.15 },
+                        uWarpAmpX: { value: 0.5 },
+                        uWarpFreqX: { value: 0.8 },
+                        uWarpTimeX: { value: 0.3 },
+                        uWarpAmpY: { value: 0.5 },
+                        uWarpFreqY: { value: 0.9 },
+                        uWarpTimeY: { value: 0.2 },
+                        uGyroidScale: { value: 1.3 },
+                        uRidgeFrequency: { value: 5.0 },
+                        uRidgeZFrequency: { value: 6.0 },
+                        uBaseRadius: { value: 0.18 },
+                        uRidgeAmplitude: { value: 0.06 },
+                        uDistanceScale: { value: 0.35 },
+                        uMarchSteps: { value: 90.0 },
+                        uMaxDepth: { value: 25.0 },
+                        uStepMinMultiplier: { value: 0.8 },
+                        uStepMinFloor: { value: 0.015 },
+                        uCoreThreshold: { value: 0.25 },
+                        uMistIntensity: { value: 0.15 },
+                        uCoreIntensity: { value: 3.5 },
+                        uPulseSpeed: { value: 6.0 },
+                        uPulseZFreq: { value: 2.5 },
+                        uPulseAngleFreq: { value: 2.0 },
+                        uMix1ZFreq: { value: 0.4 },
+                        uMix2Freq: { value: 0.5 },
+                        uDensityFade: { value: 0.12 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                        uColorBack: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
+                        uColor1: { value: new THREE.Vector3(0.0, 0.0, 0.4039) },
+                        uColor2: { value: new THREE.Vector3(0.0, 0.8, 1.0) },
+                        uColor3: { value: new THREE.Vector3(0.0, 0.6, 0.0) },
+                        uColor4: { value: new THREE.Vector3(0.498, 0.0, 1.0) },
+                    });
+                } else if (type === 'neonKaleidoscope') {
+                    baseFragment = neonKaleidoscopeFragShader;
+                    Object.assign(uniforms, {
+                        uSpeed: { value: 1.0 },
+                        uIterationCount: { value: 10.0 },
+                        uCellScale: { value: 1.16 },
+                        uFormRadius: { value: 0.69 },
+                        uFormAngularity: { value: 1.0 },
+                        uCornerWeight: { value: 0.45 },
+                        uFacetCount: { value: 6.0 },
+                        uFacetSmoothness: { value: 1.0 },
+                        uFacetSpin: { value: 0.0 },
+                        uColorRate: { value: 0.50 },
+                        uPhaseRate: { value: 1.0 },
+                        uLayerShift: { value: 0.50 },
+                        uBandFrequency: { value: 36.10 },
+                        uBandDivisor: { value: 3.41 },
+                        uLightWidth: { value: 0.020 },
+                        uLightPower: { value: 1.50 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                        uBaseColor: { value: new THREE.Vector4(0.2392, 0.3647, 1.0, 1.0) },
+                    });
                 } else {
                     baseFragment = meltFragShader;
                     Object.assign(uniforms, {
@@ -4271,6 +4959,108 @@
                             mat.uniforms.uDistanceDepthFactor.value = cur.halo.distanceDepthFactor;
                             mat.uniforms.uExposureScale.value = cur.halo.exposureScale;
                             mat.uniforms.uBackgroundColor.value.set(...cur.halo.backgroundColor);
+                        } else if (cur.activeShader === 'chromaticUniverse') {
+                            // Raw elapsed + its own uSpeed uniform - internal uTime*uSpeed multiply.
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uSpeed.value = cur.chromaticUniverse.speed;
+                            mat.uniforms.uPathRadius.value = cur.chromaticUniverse.pathRadius;
+                            mat.uniforms.uPathFreqX.value = cur.chromaticUniverse.pathFreqX;
+                            mat.uniforms.uPathFreqY.value = cur.chromaticUniverse.pathFreqY;
+                            mat.uniforms.uLookAheadDistance.value = cur.chromaticUniverse.lookAheadDistance;
+                            mat.uniforms.uMarchSteps.value = cur.chromaticUniverse.marchSteps;
+                            mat.uniforms.uMaxDistance.value = cur.chromaticUniverse.maxDistance;
+                            mat.uniforms.uOrbSize.value = cur.chromaticUniverse.orbSize;
+                            mat.uniforms.uOrbSwayAmp.value = cur.chromaticUniverse.orbSwayAmp;
+                            mat.uniforms.uBaseRadiusAmp.value = cur.chromaticUniverse.baseRadiusAmp;
+                            mat.uniforms.uBaseRadiusFreq.value = cur.chromaticUniverse.baseRadiusFreq;
+                            mat.uniforms.uTunnelOffsetX.value = cur.chromaticUniverse.tunnelOffsetX;
+                            mat.uniforms.uScoopFrequency.value = cur.chromaticUniverse.scoopFrequency;
+                            mat.uniforms.uScoopScale.value = cur.chromaticUniverse.scoopScale;
+                            mat.uniforms.uDetailFrequency.value = cur.chromaticUniverse.detailFrequency;
+                            mat.uniforms.uDetailScale.value = cur.chromaticUniverse.detailScale;
+                            mat.uniforms.uFluidIterations.value = cur.chromaticUniverse.fluidIterations;
+                            mat.uniforms.uFluidTunnelScale.value = cur.chromaticUniverse.fluidTunnelScale;
+                            mat.uniforms.uWallBrightness.value = cur.chromaticUniverse.wallBrightness;
+                            mat.uniforms.uOrbBrightness.value = cur.chromaticUniverse.orbBrightness;
+                            mat.uniforms.uOrbMinDist.value = cur.chromaticUniverse.orbMinDist;
+                            mat.uniforms.uToneMapDivisor.value = cur.chromaticUniverse.toneMapDivisor;
+                            mat.uniforms.uPaletteBrightness.value = cur.chromaticUniverse.paletteBrightness;
+                            mat.uniforms.uColorIterScale.value = cur.chromaticUniverse.colorIterScale;
+                            mat.uniforms.uHue.value = cur.chromaticUniverse.hue;
+                            mat.uniforms.uSaturation.value = cur.chromaticUniverse.saturation;
+                            mat.uniforms.uColorCount.value = cur.chromaticUniverse.colorCount;
+                            for (let i = 0; i < 10; i++) {
+                                const hex = cur.chromaticUniverse.colors[i];
+                                if (hex) {
+                                    const [cr, cg, cb] = hexToRgbArray(hex);
+                                    mat.uniforms.uColors.value[i].set(cr, cg, cb, 1.0);
+                                }
+                            }
+                        } else if (cur.activeShader === 'membranes') {
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uSpeed.value = cur.membranes.speed;
+                            mat.uniforms.uCameraOrbitAmp.value = cur.membranes.cameraOrbitAmp;
+                            mat.uniforms.uCameraOrbitFreqX.value = cur.membranes.cameraOrbitFreqX;
+                            mat.uniforms.uCameraOrbitFreqY.value = cur.membranes.cameraOrbitFreqY;
+                            mat.uniforms.uLookAheadAmp.value = cur.membranes.lookAheadAmp;
+                            mat.uniforms.uLookAheadFreq.value = cur.membranes.lookAheadFreq;
+                            mat.uniforms.uLookAheadDistance.value = cur.membranes.lookAheadDistance;
+                            mat.uniforms.uFov.value = cur.membranes.fov;
+                            mat.uniforms.uSpiralAmount.value = cur.membranes.spiralAmount;
+                            mat.uniforms.uWarpAmpX.value = cur.membranes.warpAmpX;
+                            mat.uniforms.uWarpFreqX.value = cur.membranes.warpFreqX;
+                            mat.uniforms.uWarpTimeX.value = cur.membranes.warpTimeX;
+                            mat.uniforms.uWarpAmpY.value = cur.membranes.warpAmpY;
+                            mat.uniforms.uWarpFreqY.value = cur.membranes.warpFreqY;
+                            mat.uniforms.uWarpTimeY.value = cur.membranes.warpTimeY;
+                            mat.uniforms.uGyroidScale.value = cur.membranes.gyroidScale;
+                            mat.uniforms.uRidgeFrequency.value = cur.membranes.ridgeFrequency;
+                            mat.uniforms.uRidgeZFrequency.value = cur.membranes.ridgeZFrequency;
+                            mat.uniforms.uBaseRadius.value = cur.membranes.baseRadius;
+                            mat.uniforms.uRidgeAmplitude.value = cur.membranes.ridgeAmplitude;
+                            mat.uniforms.uDistanceScale.value = cur.membranes.distanceScale;
+                            mat.uniforms.uMarchSteps.value = cur.membranes.marchSteps;
+                            mat.uniforms.uMaxDepth.value = cur.membranes.maxDepth;
+                            mat.uniforms.uStepMinMultiplier.value = cur.membranes.stepMinMultiplier;
+                            mat.uniforms.uStepMinFloor.value = cur.membranes.stepMinFloor;
+                            mat.uniforms.uCoreThreshold.value = cur.membranes.coreThreshold;
+                            mat.uniforms.uMistIntensity.value = cur.membranes.mistIntensity;
+                            mat.uniforms.uCoreIntensity.value = cur.membranes.coreIntensity;
+                            mat.uniforms.uPulseSpeed.value = cur.membranes.pulseSpeed;
+                            mat.uniforms.uPulseZFreq.value = cur.membranes.pulseZFreq;
+                            mat.uniforms.uPulseAngleFreq.value = cur.membranes.pulseAngleFreq;
+                            mat.uniforms.uMix1ZFreq.value = cur.membranes.mix1ZFreq;
+                            mat.uniforms.uMix2Freq.value = cur.membranes.mix2Freq;
+                            mat.uniforms.uDensityFade.value = cur.membranes.densityFade;
+                            mat.uniforms.uHue.value = cur.membranes.hue;
+                            mat.uniforms.uSaturation.value = cur.membranes.saturation;
+                            mat.uniforms.uColorBack.value.set(...cur.membranes.colorBack);
+                            mat.uniforms.uColor1.value.set(...cur.membranes.color1);
+                            mat.uniforms.uColor2.value.set(...cur.membranes.color2);
+                            mat.uniforms.uColor3.value.set(...cur.membranes.color3);
+                            mat.uniforms.uColor4.value.set(...cur.membranes.color4);
+                        } else if (cur.activeShader === 'neonKaleidoscope') {
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uSpeed.value = cur.neonKaleidoscope.speed;
+                            mat.uniforms.uIterationCount.value = cur.neonKaleidoscope.iterationCount;
+                            mat.uniforms.uCellScale.value = cur.neonKaleidoscope.cellScale;
+                            mat.uniforms.uFormRadius.value = cur.neonKaleidoscope.formRadius;
+                            mat.uniforms.uFormAngularity.value = cur.neonKaleidoscope.formAngularity;
+                            mat.uniforms.uCornerWeight.value = cur.neonKaleidoscope.cornerWeight;
+                            mat.uniforms.uFacetCount.value = cur.neonKaleidoscope.facetCount;
+                            mat.uniforms.uFacetSmoothness.value = cur.neonKaleidoscope.facetSmoothness;
+                            mat.uniforms.uFacetSpin.value = cur.neonKaleidoscope.facetSpin;
+                            mat.uniforms.uColorRate.value = cur.neonKaleidoscope.colorRate;
+                            mat.uniforms.uPhaseRate.value = cur.neonKaleidoscope.phaseRate;
+                            mat.uniforms.uLayerShift.value = cur.neonKaleidoscope.layerShift;
+                            mat.uniforms.uBandFrequency.value = cur.neonKaleidoscope.bandFrequency;
+                            mat.uniforms.uBandDivisor.value = cur.neonKaleidoscope.bandDivisor;
+                            mat.uniforms.uLightWidth.value = cur.neonKaleidoscope.lightWidth;
+                            mat.uniforms.uLightPower.value = cur.neonKaleidoscope.lightPower;
+                            mat.uniforms.uHue.value = cur.neonKaleidoscope.hue;
+                            mat.uniforms.uSaturation.value = cur.neonKaleidoscope.saturation;
+                            const [bcr, bcg, bcb] = hexToRgbArray(cur.neonKaleidoscope.baseColor);
+                            mat.uniforms.uBaseColor.value.set(bcr, bcg, bcb, 1.0);
                         }
                     }
 
@@ -4509,6 +5299,103 @@
                     exposureScale: 2000.0,
                     backgroundColor: [0.0, 0.0, 0.0],
                 },
+                chromaticUniverse: {
+                    speed: 1.0,
+                    pathRadius: 12.0,
+                    pathFreqX: 0.1,
+                    pathFreqY: 0.12,
+                    lookAheadDistance: 4.0,
+                    marchSteps: 28.0,
+                    maxDistance: 30.0,
+                    orbSize: 0.01,
+                    orbSwayAmp: 2.0,
+                    baseRadiusAmp: 2.0,
+                    baseRadiusFreq: 0.6,
+                    tunnelOffsetX: 6.0,
+                    scoopFrequency: 0.4,
+                    scoopScale: 0.25,
+                    detailFrequency: 16.0,
+                    detailScale: 0.22,
+                    fluidIterations: 7.0,
+                    fluidTunnelScale: 0.4,
+                    wallBrightness: 2.5,
+                    orbBrightness: 10.0,
+                    orbMinDist: 0.6,
+                    toneMapDivisor: 1500.0,
+                    paletteBrightness: 2.0,
+                    colorIterScale: 0.4,
+                    colors: [
+                        "#FF3355", "#33CCFF", "#66FF88", "#FF33BB", "#33FFCC",
+                        "#66FF33", "#6633FF", "#CC33FF", "#FF6633", "#FFCC33",
+                    ],
+                    colorCount: 9,
+                    hue: 0,
+                    saturation: 1.0,
+                },
+                membranes: {
+                    speed: 1.0,
+                    cameraOrbitAmp: 0.8,
+                    cameraOrbitFreqX: 0.2,
+                    cameraOrbitFreqY: 0.15,
+                    lookAheadAmp: 0.4,
+                    lookAheadFreq: 0.1,
+                    lookAheadDistance: 4.0,
+                    fov: 1.2,
+                    spiralAmount: 0.15,
+                    warpAmpX: 0.5,
+                    warpFreqX: 0.8,
+                    warpTimeX: 0.3,
+                    warpAmpY: 0.5,
+                    warpFreqY: 0.9,
+                    warpTimeY: 0.2,
+                    gyroidScale: 1.3,
+                    ridgeFrequency: 5.0,
+                    ridgeZFrequency: 6.0,
+                    baseRadius: 0.18,
+                    ridgeAmplitude: 0.06,
+                    distanceScale: 0.35,
+                    marchSteps: 90.0,
+                    maxDepth: 25.0,
+                    stepMinMultiplier: 0.8,
+                    stepMinFloor: 0.015,
+                    coreThreshold: 0.25,
+                    mistIntensity: 0.15,
+                    coreIntensity: 3.5,
+                    pulseSpeed: 6.0,
+                    pulseZFreq: 2.5,
+                    pulseAngleFreq: 2.0,
+                    mix1ZFreq: 0.4,
+                    mix2Freq: 0.5,
+                    densityFade: 0.12,
+                    colorBack: [0.0, 0.0, 0.0],
+                    color1: [0.0, 0.0, 0.4039],
+                    color2: [0.0, 0.8, 1.0],
+                    color3: [0.0, 0.6, 0.0],
+                    color4: [0.498, 0.0, 1.0],
+                    hue: 0,
+                    saturation: 1.0,
+                },
+                neonKaleidoscope: {
+                    speed: 1.0,
+                    iterationCount: 10.0,
+                    cellScale: 1.16,
+                    formRadius: 0.69,
+                    formAngularity: 1.0,
+                    cornerWeight: 0.45,
+                    facetCount: 6.0,
+                    facetSmoothness: 1.0,
+                    facetSpin: 0.0,
+                    colorRate: 0.50,
+                    phaseRate: 1.0,
+                    layerShift: 0.50,
+                    bandFrequency: 36.10,
+                    bandDivisor: 3.41,
+                    lightWidth: 0.020,
+                    lightPower: 1.50,
+                    baseColor: "#3D5DFF",
+                    hue: 0,
+                    saturation: 1.0,
+                },
                 blurStrength: 0.0,
                 isFrozen: false,
                 manualTime: 0,
@@ -4680,8 +5567,8 @@
                             </label>
                             <CustomSlider
                                 value={settings.fontSize}
-                                min={10}
-                                max={1200}
+                                min={12}
+                                max={1600}
                                 step={1}
                                 onValueChange={v => handleSlider('fontSize', v)}
                                 isRTL={dir === 'rtl'}
@@ -4752,7 +5639,7 @@
                         <div className="space-y-3 pt-4 border-t border-white/10">
                             <StaticSelect
                                 label={t('activeShader')}
-                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi', 'chromaticLight', 'halo'].map(v => ({
+                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi', 'chromaticLight', 'halo', 'chromaticUniverse', 'membranes', 'neonKaleidoscope'].map(v => ({
                                     value: v,
                                     label: v === 'luminousResin' ? t('luminousResin') : t(v),
                                 }))}
@@ -5759,6 +6646,249 @@
                                     <ColorPicker
                                         color={rgbArrayToHex(settings.halo.backgroundColor)}
                                         onChange={h => updateNested('halo', 'backgroundColor', hexToRgbArray(h))}
+                                    />
+                                </div>
+                            </>
+                        )}
+
+                        {/* CHROMATIC UNIVERSE SHADER */}
+                        {settings.activeShader === 'chromaticUniverse' && (
+                            <>
+                                <ShaderSlider label={t('speed')} value={settings.chromaticUniverse.speed} min={0} max={5} step={0.05}
+                                    update={v => updateNested('chromaticUniverse', 'speed', v)} dir={dir} />
+                                <ShaderSlider label={t('pathRadius')} value={settings.chromaticUniverse.pathRadius} min={0} max={30} step={0.1}
+                                    update={v => updateNested('chromaticUniverse', 'pathRadius', v)} dir={dir} />
+                                <ShaderSlider label={t('pathFreqX')} value={settings.chromaticUniverse.pathFreqX} min={0} max={1} step={0.001}
+                                    update={v => updateNested('chromaticUniverse', 'pathFreqX', v)} dir={dir} />
+                                <ShaderSlider label={t('pathFreqY')} value={settings.chromaticUniverse.pathFreqY} min={0} max={1} step={0.001}
+                                    update={v => updateNested('chromaticUniverse', 'pathFreqY', v)} dir={dir} />
+                                <ShaderSlider label={t('lookAheadDistance')} value={settings.chromaticUniverse.lookAheadDistance} min={0.1} max={20} step={0.1}
+                                    update={v => updateNested('chromaticUniverse', 'lookAheadDistance', v)} dir={dir} />
+                                <ShaderSlider label={t('marchSteps')} value={settings.chromaticUniverse.marchSteps} min={1} max={60} step={1}
+                                    update={v => updateNested('chromaticUniverse', 'marchSteps', v)} dir={dir} />
+                                <ShaderSlider label={t('maxDistance')} value={settings.chromaticUniverse.maxDistance} min={1} max={100} step={0.5}
+                                    update={v => updateNested('chromaticUniverse', 'maxDistance', v)} dir={dir} />
+                                <ShaderSlider label={t('orbSize')} value={settings.chromaticUniverse.orbSize} min={0} max={2} step={0.005}
+                                    update={v => updateNested('chromaticUniverse', 'orbSize', v)} dir={dir} />
+                                <ShaderSlider label={t('orbSwayAmp')} value={settings.chromaticUniverse.orbSwayAmp} min={0} max={10} step={0.1}
+                                    update={v => updateNested('chromaticUniverse', 'orbSwayAmp', v)} dir={dir} />
+                                <ShaderSlider label={t('baseRadiusAmp')} value={settings.chromaticUniverse.baseRadiusAmp} min={0} max={10} step={0.1}
+                                    update={v => updateNested('chromaticUniverse', 'baseRadiusAmp', v)} dir={dir} />
+                                <ShaderSlider label={t('baseRadiusFreq')} value={settings.chromaticUniverse.baseRadiusFreq} min={0} max={3} step={0.01}
+                                    update={v => updateNested('chromaticUniverse', 'baseRadiusFreq', v)} dir={dir} />
+                                <ShaderSlider label={t('tunnelOffsetX')} value={settings.chromaticUniverse.tunnelOffsetX} min={-20} max={20} step={0.1}
+                                    update={v => updateNested('chromaticUniverse', 'tunnelOffsetX', v)} dir={dir} />
+                                <ShaderSlider label={t('scoopFrequency')} value={settings.chromaticUniverse.scoopFrequency} min={0} max={3} step={0.01}
+                                    update={v => updateNested('chromaticUniverse', 'scoopFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('scoopScale')} value={settings.chromaticUniverse.scoopScale} min={0} max={2} step={0.01}
+                                    update={v => updateNested('chromaticUniverse', 'scoopScale', v)} dir={dir} />
+                                <ShaderSlider label={t('detailFrequency')} value={settings.chromaticUniverse.detailFrequency} min={0} max={40} step={0.5}
+                                    update={v => updateNested('chromaticUniverse', 'detailFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('detailScale')} value={settings.chromaticUniverse.detailScale} min={0} max={2} step={0.01}
+                                    update={v => updateNested('chromaticUniverse', 'detailScale', v)} dir={dir} />
+                                <ShaderSlider label={t('fluidIterations')} value={settings.chromaticUniverse.fluidIterations} min={1} max={12} step={1}
+                                    update={v => updateNested('chromaticUniverse', 'fluidIterations', v)} dir={dir} />
+                                <ShaderSlider label={t('fluidTunnelScale')} value={settings.chromaticUniverse.fluidTunnelScale} min={0} max={2} step={0.01}
+                                    update={v => updateNested('chromaticUniverse', 'fluidTunnelScale', v)} dir={dir} />
+                                <ShaderSlider label={t('wallBrightness')} value={settings.chromaticUniverse.wallBrightness} min={0} max={10} step={0.1}
+                                    update={v => updateNested('chromaticUniverse', 'wallBrightness', v)} dir={dir} />
+                                <ShaderSlider label={t('orbBrightness')} value={settings.chromaticUniverse.orbBrightness} min={0} max={30} step={0.5}
+                                    update={v => updateNested('chromaticUniverse', 'orbBrightness', v)} dir={dir} />
+                                <ShaderSlider label={t('orbMinDist')} value={settings.chromaticUniverse.orbMinDist} min={0.01} max={3} step={0.01}
+                                    update={v => updateNested('chromaticUniverse', 'orbMinDist', v)} dir={dir} />
+                                <ShaderSlider label={t('toneMapDivisor')} value={settings.chromaticUniverse.toneMapDivisor} min={100} max={5000} step={10}
+                                    update={v => updateNested('chromaticUniverse', 'toneMapDivisor', v)} dir={dir} />
+                                <ShaderSlider label={t('paletteBrightness')} value={settings.chromaticUniverse.paletteBrightness} min={0} max={10} step={0.1}
+                                    update={v => updateNested('chromaticUniverse', 'paletteBrightness', v)} dir={dir} />
+                                <ShaderSlider label={t('colorIterScale')} value={settings.chromaticUniverse.colorIterScale} min={0} max={2} step={0.01}
+                                    update={v => updateNested('chromaticUniverse', 'colorIterScale', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.chromaticUniverse.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('chromaticUniverse', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.chromaticUniverse.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('chromaticUniverse', 'saturation', v)} dir={dir} />
+
+                                <ShaderSlider
+                                    label={t('colorCount')}
+                                    value={settings.chromaticUniverse.colorCount}
+                                    min={2}
+                                    max={10}
+                                    step={1}
+                                    update={v => updateNested('chromaticUniverse', 'colorCount', v)}
+                                    dir={dir}
+                                />
+
+                                <div className="mt-4 space-y-4">
+                                    <span className="text-xs uppercase text-gray-500 block">
+                                        {t('swirlColors')}
+                                    </span>
+                                    <div className="flex flex-col space-y-3">
+                                        {[
+                                            'firstColor', 'secondColor', 'thirdColor', 'fourthColor', 'fifthColor',
+                                            'sixthColor', 'seventhColor', 'eighthColor', 'ninthColor', 'tenthColor',
+                                        ].map((translationKey, i) => {
+                                            if (i >= settings.chromaticUniverse.colorCount) return null;
+
+                                            return (
+                                                <div key={translationKey} className="w-full space-y-1 p-2 bg-white/5 rounded">
+                                                    <span className="text-[10px] uppercase text-gray-400 block">{t(translationKey)}</span>
+                                                    <ColorPicker
+                                                        color={settings.chromaticUniverse.colors[i]}
+                                                        onChange={h => {
+                                                            const newColors = [...settings.chromaticUniverse.colors];
+                                                            newColors[i] = h;
+                                                            updateNested('chromaticUniverse', 'colors', newColors);
+                                                        }}
+                                                    />
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* MEMBRANES SHADER */}
+                        {settings.activeShader === 'membranes' && (
+                            <>
+                                <ShaderSlider label={t('speed')} value={settings.membranes.speed} min={0} max={5} step={0.05}
+                                    update={v => updateNested('membranes', 'speed', v)} dir={dir} />
+                                <ShaderSlider label={t('cameraOrbitAmp')} value={settings.membranes.cameraOrbitAmp} min={0} max={5} step={0.01}
+                                    update={v => updateNested('membranes', 'cameraOrbitAmp', v)} dir={dir} />
+                                <ShaderSlider label={t('cameraOrbitFreqX')} value={settings.membranes.cameraOrbitFreqX} min={0} max={2} step={0.01}
+                                    update={v => updateNested('membranes', 'cameraOrbitFreqX', v)} dir={dir} />
+                                <ShaderSlider label={t('cameraOrbitFreqY')} value={settings.membranes.cameraOrbitFreqY} min={0} max={2} step={0.01}
+                                    update={v => updateNested('membranes', 'cameraOrbitFreqY', v)} dir={dir} />
+                                <ShaderSlider label={t('lookAheadAmp')} value={settings.membranes.lookAheadAmp} min={0} max={5} step={0.01}
+                                    update={v => updateNested('membranes', 'lookAheadAmp', v)} dir={dir} />
+                                <ShaderSlider label={t('lookAheadFreq')} value={settings.membranes.lookAheadFreq} min={0} max={2} step={0.01}
+                                    update={v => updateNested('membranes', 'lookAheadFreq', v)} dir={dir} />
+                                <ShaderSlider label={t('lookAheadDistance')} value={settings.membranes.lookAheadDistance} min={0.1} max={20} step={0.1}
+                                    update={v => updateNested('membranes', 'lookAheadDistance', v)} dir={dir} />
+                                <ShaderSlider label={t('fov')} value={settings.membranes.fov} min={0.1} max={3} step={0.01}
+                                    update={v => updateNested('membranes', 'fov', v)} dir={dir} />
+                                <ShaderSlider label={t('spiralAmount')} value={settings.membranes.spiralAmount} min={-1} max={1} step={0.01}
+                                    update={v => updateNested('membranes', 'spiralAmount', v)} dir={dir} />
+                                <ShaderSlider label={t('warpAmpX')} value={settings.membranes.warpAmpX} min={0} max={2} step={0.01}
+                                    update={v => updateNested('membranes', 'warpAmpX', v)} dir={dir} />
+                                <ShaderSlider label={t('warpFreqX')} value={settings.membranes.warpFreqX} min={0} max={3} step={0.01}
+                                    update={v => updateNested('membranes', 'warpFreqX', v)} dir={dir} />
+                                <ShaderSlider label={t('warpTimeX')} value={settings.membranes.warpTimeX} min={0} max={3} step={0.01}
+                                    update={v => updateNested('membranes', 'warpTimeX', v)} dir={dir} />
+                                <ShaderSlider label={t('warpAmpY')} value={settings.membranes.warpAmpY} min={0} max={2} step={0.01}
+                                    update={v => updateNested('membranes', 'warpAmpY', v)} dir={dir} />
+                                <ShaderSlider label={t('warpFreqY')} value={settings.membranes.warpFreqY} min={0} max={3} step={0.01}
+                                    update={v => updateNested('membranes', 'warpFreqY', v)} dir={dir} />
+                                <ShaderSlider label={t('warpTimeY')} value={settings.membranes.warpTimeY} min={0} max={3} step={0.01}
+                                    update={v => updateNested('membranes', 'warpTimeY', v)} dir={dir} />
+                                <ShaderSlider label={t('gyroidScale')} value={settings.membranes.gyroidScale} min={0.1} max={5} step={0.01}
+                                    update={v => updateNested('membranes', 'gyroidScale', v)} dir={dir} />
+                                <ShaderSlider label={t('ridgeFrequency')} value={settings.membranes.ridgeFrequency} min={0} max={20} step={0.1}
+                                    update={v => updateNested('membranes', 'ridgeFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('ridgeZFrequency')} value={settings.membranes.ridgeZFrequency} min={0} max={20} step={0.1}
+                                    update={v => updateNested('membranes', 'ridgeZFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('baseRadius')} value={settings.membranes.baseRadius} min={0} max={1} step={0.005}
+                                    update={v => updateNested('membranes', 'baseRadius', v)} dir={dir} />
+                                <ShaderSlider label={t('ridgeAmplitude')} value={settings.membranes.ridgeAmplitude} min={0} max={0.5} step={0.005}
+                                    update={v => updateNested('membranes', 'ridgeAmplitude', v)} dir={dir} />
+                                <ShaderSlider label={t('distanceScale')} value={settings.membranes.distanceScale} min={0.01} max={2} step={0.01}
+                                    update={v => updateNested('membranes', 'distanceScale', v)} dir={dir} />
+                                <ShaderSlider label={t('marchSteps')} value={settings.membranes.marchSteps} min={1} max={200} step={1}
+                                    update={v => updateNested('membranes', 'marchSteps', v)} dir={dir} />
+                                <ShaderSlider label={t('maxDepth')} value={settings.membranes.maxDepth} min={1} max={60} step={0.5}
+                                    update={v => updateNested('membranes', 'maxDepth', v)} dir={dir} />
+                                <ShaderSlider label={t('stepMinMultiplier')} value={settings.membranes.stepMinMultiplier} min={0.05} max={2} step={0.01}
+                                    update={v => updateNested('membranes', 'stepMinMultiplier', v)} dir={dir} />
+                                <ShaderSlider label={t('stepMinFloor')} value={settings.membranes.stepMinFloor} min={0.001} max={0.1} step={0.001}
+                                    update={v => updateNested('membranes', 'stepMinFloor', v)} dir={dir} />
+                                <ShaderSlider label={t('coreThreshold')} value={settings.membranes.coreThreshold} min={0.01} max={1} step={0.01}
+                                    update={v => updateNested('membranes', 'coreThreshold', v)} dir={dir} />
+                                <ShaderSlider label={t('mistIntensity')} value={settings.membranes.mistIntensity} min={0} max={2} step={0.01}
+                                    update={v => updateNested('membranes', 'mistIntensity', v)} dir={dir} />
+                                <ShaderSlider label={t('coreIntensity')} value={settings.membranes.coreIntensity} min={0} max={10} step={0.1}
+                                    update={v => updateNested('membranes', 'coreIntensity', v)} dir={dir} />
+                                <ShaderSlider label={t('pulseSpeed')} value={settings.membranes.pulseSpeed} min={0} max={20} step={0.1}
+                                    update={v => updateNested('membranes', 'pulseSpeed', v)} dir={dir} />
+                                <ShaderSlider label={t('pulseZFreq')} value={settings.membranes.pulseZFreq} min={0} max={10} step={0.1}
+                                    update={v => updateNested('membranes', 'pulseZFreq', v)} dir={dir} />
+                                <ShaderSlider label={t('pulseAngleFreq')} value={settings.membranes.pulseAngleFreq} min={0} max={10} step={0.1}
+                                    update={v => updateNested('membranes', 'pulseAngleFreq', v)} dir={dir} />
+                                <ShaderSlider label={t('mix1ZFreq')} value={settings.membranes.mix1ZFreq} min={0} max={3} step={0.01}
+                                    update={v => updateNested('membranes', 'mix1ZFreq', v)} dir={dir} />
+                                <ShaderSlider label={t('mix2Freq')} value={settings.membranes.mix2Freq} min={0} max={3} step={0.01}
+                                    update={v => updateNested('membranes', 'mix2Freq', v)} dir={dir} />
+                                <ShaderSlider label={t('densityFade')} value={settings.membranes.densityFade} min={0} max={1} step={0.005}
+                                    update={v => updateNested('membranes', 'densityFade', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.membranes.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('membranes', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.membranes.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('membranes', 'saturation', v)} dir={dir} />
+
+                                <div className="space-y-2 mt-4">
+                                    <span className="text-xs uppercase text-gray-500">{t('colorBack')}</span>
+                                    <ColorPicker
+                                        color={rgbArrayToHex(settings.membranes.colorBack)}
+                                        onChange={h => updateNested('membranes', 'colorBack', hexToRgbArray(h))}
+                                    />
+                                </div>
+                                <div className="flex flex-wrap gap-6 mt-4">
+                                    {['color1', 'color2', 'color3', 'color4'].map((col, i) => (
+                                        <div key={col} className="flex-1 min-w-[300px] space-y-2">
+                                            <span className="text-xs uppercase text-gray-500">Color {i + 1}</span>
+                                            <ColorPicker
+                                                color={rgbArrayToHex(settings.membranes[col])}
+                                                onChange={h => updateNested('membranes', col, hexToRgbArray(h))}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+
+                        {/* NEON KALEIDOSCOPE SHADER */}
+                        {settings.activeShader === 'neonKaleidoscope' && (
+                            <>
+                                <ShaderSlider label={t('speed')} value={settings.neonKaleidoscope.speed} min={0} max={5} step={0.05}
+                                    update={v => updateNested('neonKaleidoscope', 'speed', v)} dir={dir} />
+                                <ShaderSlider label={t('iterationCount')} value={settings.neonKaleidoscope.iterationCount} min={1} max={12} step={1}
+                                    update={v => updateNested('neonKaleidoscope', 'iterationCount', v)} dir={dir} />
+                                <ShaderSlider label={t('cellScale')} value={settings.neonKaleidoscope.cellScale} min={0.1} max={5} step={0.01}
+                                    update={v => updateNested('neonKaleidoscope', 'cellScale', v)} dir={dir} />
+                                <ShaderSlider label={t('formRadius')} value={settings.neonKaleidoscope.formRadius} min={0} max={2} step={0.01}
+                                    update={v => updateNested('neonKaleidoscope', 'formRadius', v)} dir={dir} />
+                                <ShaderSlider label={t('formAngularity')} value={settings.neonKaleidoscope.formAngularity} min={0} max={1} step={0.01}
+                                    update={v => updateNested('neonKaleidoscope', 'formAngularity', v)} dir={dir} />
+                                <ShaderSlider label={t('cornerWeight')} value={settings.neonKaleidoscope.cornerWeight} min={0} max={2} step={0.01}
+                                    update={v => updateNested('neonKaleidoscope', 'cornerWeight', v)} dir={dir} />
+                                <ShaderSlider label={t('facetCount')} value={settings.neonKaleidoscope.facetCount} min={1} max={24} step={1}
+                                    update={v => updateNested('neonKaleidoscope', 'facetCount', v)} dir={dir} />
+                                <ShaderSlider label={t('facetSmoothness')} value={settings.neonKaleidoscope.facetSmoothness} min={0} max={1} step={0.01}
+                                    update={v => updateNested('neonKaleidoscope', 'facetSmoothness', v)} dir={dir} />
+                                <ShaderSlider label={t('facetSpin')} value={settings.neonKaleidoscope.facetSpin} min={-3} max={3} step={0.01}
+                                    update={v => updateNested('neonKaleidoscope', 'facetSpin', v)} dir={dir} />
+                                <ShaderSlider label={t('bandFrequency')} value={settings.neonKaleidoscope.bandFrequency} min={0} max={100} step={0.1}
+                                    update={v => updateNested('neonKaleidoscope', 'bandFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('bandDivisor')} value={settings.neonKaleidoscope.bandDivisor} min={0.1} max={10} step={0.01}
+                                    update={v => updateNested('neonKaleidoscope', 'bandDivisor', v)} dir={dir} />
+                                <ShaderSlider label={t('colorRate')} value={settings.neonKaleidoscope.colorRate} min={0} max={3} step={0.01}
+                                    update={v => updateNested('neonKaleidoscope', 'colorRate', v)} dir={dir} />
+                                <ShaderSlider label={t('phaseRate')} value={settings.neonKaleidoscope.phaseRate} min={0} max={5} step={0.01}
+                                    update={v => updateNested('neonKaleidoscope', 'phaseRate', v)} dir={dir} />
+                                <ShaderSlider label={t('layerShift')} value={settings.neonKaleidoscope.layerShift} min={0} max={3} step={0.01}
+                                    update={v => updateNested('neonKaleidoscope', 'layerShift', v)} dir={dir} />
+                                <ShaderSlider label={t('lightWidth')} value={settings.neonKaleidoscope.lightWidth} min={0.001} max={0.5} step={0.001}
+                                    update={v => updateNested('neonKaleidoscope', 'lightWidth', v)} dir={dir} />
+                                <ShaderSlider label={t('lightPower')} value={settings.neonKaleidoscope.lightPower} min={0.1} max={5} step={0.01}
+                                    update={v => updateNested('neonKaleidoscope', 'lightPower', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.neonKaleidoscope.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('neonKaleidoscope', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.neonKaleidoscope.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('neonKaleidoscope', 'saturation', v)} dir={dir} />
+
+                                <div className="space-y-2 mt-4">
+                                    <span className="text-xs uppercase text-gray-500">{t('baseColor')}</span>
+                                    <ColorPicker
+                                        color={settings.neonKaleidoscope.baseColor}
+                                        onChange={h => updateNested('neonKaleidoscope', 'baseColor', h)}
                                     />
                                 </div>
                             </>
