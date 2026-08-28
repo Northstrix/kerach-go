@@ -105,3 +105,11 @@ The app is fully localized into:
 [Neon Kaleidoscope](https://codepen.io/editor/sabosugi/pen/01a02f92-c5a4-7680-9919-88d6778ba369) by [Sabo Sugi](https://codepen.io/sabosugi)
 
 [Happy Glow Cruise](https://www.shadertoy.com/view/3ccyD7) by [diatribes](https://www.shadertoy.com/user/diatribes)
+
+### Shader Modification & Attribution Disclosure
+
+Regarding the shaders distributed under the Creative Commons Attribution-NonCommercial-ShareAlike (CC BY-NC-SA 3.0 / CC BY-NC-SA 4.0) licenses:
+
+These shaders have been modified, at the very least, to the extent necessary to run on Mercurav, and may have been further altered to have their appearance enhanced, remixed, or changed by modifying and/or extending the shaders' logic. 
+
+Links to the original works are present in the "Credit" section of this [`README.md`](https://github.com/Northstrix/kerach-go/blob/main/README.md) and the "Credit & Info" section within [the web application](https://northstrix.github.io/kerach-go/).
