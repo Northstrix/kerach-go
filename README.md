@@ -106,6 +106,8 @@ The app is fully localized into:
 
 [Happy Glow Cruise](https://www.shadertoy.com/view/3ccyD7) by [diatribes](https://www.shadertoy.com/user/diatribes)
 
+[Fly in Digital Cave](https://codepen.io/editor/sabosugi/pen/01a05d05-8b0a-7e39-a456-6aeaa576ff84) by [Sabo Sugi](https://codepen.io/sabosugi)
+
 ### Shader Modification & Attribution Disclosure
 
 Regarding the shaders distributed under the Creative Commons Attribution-NonCommercial-ShareAlike (CC BY-NC-SA 3.0 / CC BY-NC-SA 4.0) licenses:
