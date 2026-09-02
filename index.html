@@ -2506,6 +2506,271 @@
         }
         `;
 
+        const digitalCaveFragShader = `precision highp float;
+
+        uniform float uTime;
+        uniform vec2 uResolution;
+
+        // Camera
+        uniform float uCameraFov;
+        uniform float uLookAhead;
+        uniform float uLookAheadVariation;
+        uniform float uLookAheadFrequency;
+
+        // Flight
+        uniform float uCameraSpeed;
+        uniform float uDriftAmplitude;
+        uniform float uDriftXFrequency;
+        uniform float uDriftYFrequency;
+        uniform float uSideShiftAmplitude;
+        uniform float uSideShiftFrequency;
+        uniform float uSideShiftEdge;
+
+        // Fractal
+        uniform float uFractalTimeScale;
+        uniform float uTrailSpeed;
+        uniform int uFractalSteps;
+        uniform float uPatternScale;
+        uniform float uPatternPeriod;
+        uniform float uDivisorMin;
+        uniform float uDivisorMax;
+        uniform float uTrailFrequency;
+        uniform float uLayerPhase;
+        uniform float uStripeWeight;
+        uniform float uLineSharpness;
+        uniform float uVoronoiScale;
+        uniform float uVoronoiDepth;
+        uniform float uVoronoiSoftness;
+
+        // Geometry
+        uniform float uCorridorYOffset;
+        uniform float uCorridorSegmentLength;
+        uniform int uFoldIterations;
+        uniform float uFoldOffset;
+        uniform float uFoldAngle;
+        uniform float uQuarterAngle;
+        uniform vec3 uShellHalfSize;
+        uniform float uDistanceScale;
+
+        // Raymarch
+        uniform int uMarchSteps;
+        uniform float uSurfaceEpsilon;
+        uniform float uRayJitter;
+        uniform float uGlowFade;
+        uniform float uNearFadeStart;
+        uniform float uFieldBase;
+        uniform float uFieldStrength;
+        uniform float uEmissionGain;
+
+        // Colors
+        uniform vec3 uFractalColor;
+        uniform vec3 uGlowColor;
+        uniform float uGlowIntensity;
+
+        uniform float uHue;
+        uniform float uSaturation;
+
+        ${hueSatHelpers}
+
+        #define MAX_MARCH_STEPS 160
+        #define MAX_FRACTAL_STEPS 12
+        #define MAX_FOLD_STEPS 10
+
+        float gPatternTime;
+
+        mat2 rotation2D(float angle) {
+            float s = sin(angle);
+            float c = cos(angle);
+            return mat2(c, s, -s, c);
+        }
+
+        float randomScalar(vec2 p) {
+            vec3 q = fract(vec3(p.x, p.y, p.x) * 0.1031);
+            q += dot(q, q.yzx + 33.33);
+            return fract((q.x + q.y) * q.z);
+        }
+
+        vec2 randomPoint(vec2 p) {
+            vec3 q = fract(vec3(p.x, p.y, p.x) * vec3(0.1031, 0.1030, 0.0973));
+            q += dot(q, q.yzx + 33.33);
+            return fract((q.xx + q.yz) * q.zy);
+        }
+
+        vec3 flightPath(float z) {
+            vec2 drift = vec2(
+                sin(z * uDriftXFrequency),
+                cos(z * uDriftYFrequency)
+            ) * uDriftAmplitude;
+
+            float sideShift = smoothstep(
+                0.0, uSideShiftEdge,
+                abs(0.5 - fract(z * uSideShiftFrequency))
+            );
+
+            drift.x += sideShift * uSideShiftAmplitude;
+
+            return vec3(drift, z);
+        }
+
+        float repeatingTrail(float value) {
+            float phase = fract(value);
+            return abs(phase - 0.5) * 2.0;
+        }
+
+        float lightPattern(vec2 coord) {
+            float safePeriod = max(uPatternPeriod, 0.001);
+            float halfPeriod = safePeriod * 0.5;
+            vec2 p = abs(halfPeriod - mod(coord * uPatternScale, safePeriod)) - halfPeriod;
+            float nearest = 1000.0;
+
+            for (int layer = 0; layer < MAX_FRACTAL_STEPS; layer++) {
+                if (layer >= uFractalSteps) break;
+
+                float divisor = clamp(p.x * p.y, uDivisorMin, uDivisorMax);
+                p = abs(p) / divisor - 1.0;
+
+                if (layer > 0) {
+                    float phase = abs(p.y) * uTrailFrequency - gPatternTime * uTrailSpeed + float(layer) * uLayerPhase;
+                    float stripe = repeatingTrail(phase);
+                    nearest = min(nearest, abs(p.x) + stripe * uStripeWeight);
+                }
+            }
+
+            return exp(-uLineSharpness * nearest);
+        }
+
+        float manhattanCellDistance(vec2 p) {
+            vec2 cellId = floor(p);
+            vec2 cellUv = fract(p);
+            float distanceMin = 10.0;
+
+            for (int j = -1; j <= 1; j++) {
+                for (int i = -1; i <= 1; i++) {
+                    vec2 neighbor = vec2(float(i), float(j));
+                    vec2 seed = randomPoint(cellId + neighbor);
+                    vec2 delta = neighbor + seed - cellUv;
+                    float distanceValue = abs(delta.x) + abs(delta.y);
+                    distanceMin = min(distanceMin, distanceValue);
+                }
+            }
+
+            return distanceMin;
+        }
+
+        float boxDistance(vec3 p, vec3 halfSize) {
+            vec3 q = abs(p) - halfSize;
+            float outer = length(max(q, vec3(0.0)));
+            float inner = min(max(q.x, max(q.y, q.z)), 0.0);
+            return outer + inner;
+        }
+
+        vec3 foldCorridor(vec3 p) {
+            float orientation = sign(p.y);
+            p.y = -abs(p.y) - uCorridorYOffset;
+
+            float segmentLength = max(uCorridorSegmentLength, 0.01);
+            p.z = mod(p.z, segmentLength) - segmentLength * 0.5;
+
+            mat2 diagonalRotation = rotation2D(radians(orientation * uFoldAngle));
+            mat2 quarterRotation = rotation2D(radians(uQuarterAngle));
+
+            for (int i = 0; i < MAX_FOLD_STEPS; i++) {
+                if (i >= uFoldIterations) break;
+
+                p = abs(p) - uFoldOffset;
+                p.xz *= diagonalRotation;
+                p.yz *= quarterRotation;
+            }
+
+            return p;
+        }
+
+        float wallDisplacement(vec3 p) {
+            float cellYZ = manhattanCellDistance(p.yz * uVoronoiScale);
+            float cellXZ = manhattanCellDistance(p.xz * uVoronoiScale);
+            float cellXY = manhattanCellDistance(p.xy * uVoronoiScale);
+            float nearestCell = min(cellYZ, min(cellXZ, cellXY));
+            float profile = smoothstep(uVoronoiSoftness, 1.0, nearestCell);
+            return (profile - 0.5) * uVoronoiDepth;
+        }
+
+        float sceneDistance(vec3 worldPos) {
+            vec3 p = worldPos;
+            p.xy -= flightPath(p.z).xy;
+            vec3 folded = foldCorridor(p);
+            float shell = -boxDistance(folded, uShellHalfSize);
+            shell += wallDisplacement(folded);
+            return shell * uDistanceScale;
+        }
+
+        vec3 sampleEmission(vec3 p) {
+            float energy = lightPattern(p.xy) + lightPattern(p.xz) + lightPattern(p.yz);
+            float core = energy * energy;
+            vec3 glow = uGlowColor * uGlowIntensity;
+            return uFractalColor * energy + glow * core;
+        }
+
+        vec3 traceGlow(vec3 rayOrigin, vec3 rayDirection) {
+            vec3 accumulated = vec3(0.0);
+            float travel = 0.0;
+            float pixelNoise = randomScalar(gl_FragCoord.xy + gPatternTime);
+            float jitter = 1.0 - pixelNoise * uRayJitter;
+
+            for (int stepIndex = 0; stepIndex < MAX_MARCH_STEPS; stepIndex++) {
+                if (stepIndex >= uMarchSteps) break;
+
+                vec3 samplePos = rayOrigin + rayDirection * travel;
+                float distanceValue = sceneDistance(samplePos) * jitter;
+
+                if (distanceValue < uSurfaceEpsilon) break;
+
+                travel += max(uSurfaceEpsilon, abs(distanceValue));
+
+                vec3 emission = sampleEmission(samplePos);
+                float distanceFalloff = exp(-uGlowFade * travel * travel);
+                float nearFade = step(uNearFadeStart, travel);
+                float fieldFalloff = 1.0 / (uFieldBase + distanceValue * distanceValue * uFieldStrength);
+
+                accumulated += emission * fieldFalloff * distanceFalloff * nearFade * uEmissionGain;
+            }
+
+            return accumulated;
+        }
+
+        mat3 cameraBasis(vec3 forwardDirection) {
+            vec3 forward = normalize(forwardDirection);
+            vec3 worldUp = vec3(0.0, 1.0, 0.0);
+            vec3 right = normalize(cross(forward, worldUp));
+            vec3 up = cross(right, forward);
+            return mat3(right, up, forward);
+        }
+
+        void main() {
+            vec2 fragCoord = gl_FragCoord.xy;
+            vec2 screen = (fragCoord - uResolution * 0.5) / uResolution.y;
+
+            gPatternTime = uTime * uFractalTimeScale;
+            float flightTime = uTime * uCameraSpeed;
+
+            vec3 cameraPosition = flightPath(flightTime);
+            float lookAhead = uLookAhead + sin(flightTime * uLookAheadFrequency) * uLookAheadVariation;
+            vec3 cameraTarget = flightPath(flightTime + lookAhead);
+
+            mat3 basis = cameraBasis(cameraTarget - cameraPosition);
+            vec3 rayDirection = normalize(vec3(screen, uCameraFov));
+            rayDirection = basis * rayDirection;
+
+            vec3 color = traceGlow(cameraPosition, rayDirection);
+
+            vec3 hsv = rgb2hsv(clamp(color, 0.0, 1.0));
+            hsv.x = fract(hsv.x + uHue / 360.0);
+            hsv.y = clamp(hsv.y * uSaturation, 0.0, 1.0);
+            color = hsv2rgb(hsv);
+
+            gl_FragColor = vec4(color, 1.0);
+        }
+        `;
+
         // =========================================================================
         // LOCALIZATION
         // =========================================================================
@@ -2635,6 +2900,21 @@
                 maxSteps: "Max Steps", maxDist: "Max Distance", stepBase: "Step Base", stepMultiplier: "Step Multiplier",
                 lightGlowScale: "Light Glow Scale", wallColor: "Wall Color", wallBrightness: "Wall Brightness",
                 glowColor: "Glow Color", glowBrightness: "Glow Brightness", toneMapDivisor: "Tone Map Divisor",
+                digitalCave: "Digital Cave",
+                lookAhead: "Look Ahead", lookAheadVariation: "Look Ahead Variation", lookAheadFrequency: "Look Ahead Frequency",
+                cameraSpeed: "Camera Speed", driftAmplitude: "Drift Amplitude",
+                driftXFrequency: "Drift Frequency X", driftYFrequency: "Drift Frequency Y",
+                sideShiftAmplitude: "Side Shift Amplitude", sideShiftFrequency: "Side Shift Frequency", sideShiftEdge: "Side Shift Edge",
+                fractalTimeScale: "Fractal Time Scale", trailSpeed: "Trail Speed", fractalSteps: "Fractal Steps",
+                patternScale: "Pattern Scale", patternPeriod: "Pattern Period",
+                divisorMin: "Divisor Min", divisorMax: "Divisor Max", trailFrequency: "Trail Frequency",
+                layerPhase: "Layer Phase", stripeWeight: "Stripe Weight", lineSharpness: "Line Sharpness",
+                voronoiScale: "Voronoi Scale", voronoiDepth: "Voronoi Depth", voronoiSoftness: "Voronoi Softness",
+                corridorYOffset: "Corridor Y Offset", corridorSegmentLength: "Corridor Segment Length",
+                foldIterations: "Fold Iterations", foldOffset: "Fold Offset", foldAngle: "Fold Angle", quarterAngle: "Cross Angle",
+                shellWidth: "Shell Width", shellHeight: "Shell Height", shellDepth: "Shell Depth",
+                surfaceEpsilon: "Surface Epsilon", rayJitter: "Ray Jitter", glowFade: "Distance Fade", nearFadeStart: "Near Fade",
+                fieldBase: "Field Base", fieldStrength: "Field Strength", emissionGain: "Emission Gain",
             },
             he: {
                 appName: "קרח Go",
@@ -2758,6 +3038,21 @@
                 maxSteps: "צעדים מרביים", maxDist: "מרחק מרבי", stepBase: "בסיס צעד", stepMultiplier: "מכפיל צעד",
                 lightGlowScale: "קנה מידת זוהר אור", wallColor: "צבע קיר", wallBrightness: "בהירות קיר",
                 glowColor: "צבע זוהר", glowBrightness: "בהירות זוהר", toneMapDivisor: "מחלק מיפוי גוונים",
+                digitalCave: "מערה דיגיטלית",
+                lookAhead: "הסתכלות קדימה", lookAheadVariation: "שונות הסתכלות קדימה", lookAheadFrequency: "תדירות הסתכלות קדימה",
+                cameraSpeed: "מהירות מצלמה", driftAmplitude: "משרעת סחיפה",
+                driftXFrequency: "תדירות סחיפה X", driftYFrequency: "תדירות סחיפה Y",
+                sideShiftAmplitude: "משרעת היסט צד", sideShiftFrequency: "תדירות היסט צד", sideShiftEdge: "קצה היסט צד",
+                fractalTimeScale: "קנה מידת זמן פרקטל", trailSpeed: "מהירות שביל", fractalSteps: "צעדי פרקטל",
+                patternScale: "קנה מידת דפוס", patternPeriod: "מחזוריות דפוס",
+                divisorMin: "מחלק מינימלי", divisorMax: "מחלק מקסימלי", trailFrequency: "תדירות שביל",
+                layerPhase: "פאזת שכבה", stripeWeight: "משקל פס", lineSharpness: "חדות קו",
+                voronoiScale: "קנה מידת וורונוי", voronoiDepth: "עומק וורונוי", voronoiSoftness: "רכות וורונוי",
+                corridorYOffset: "היסט מסדרון Y", corridorSegmentLength: "אורך קטע מסדרון",
+                foldIterations: "איטרציות קיפול", foldOffset: "היסט קיפול", foldAngle: "זווית קיפול", quarterAngle: "זווית צולבת",
+                shellWidth: "רוחב מעטפת", shellHeight: "גובה מעטפת", shellDepth: "עומק מעטפת",
+                surfaceEpsilon: "אפסילון משטח", rayJitter: "רעד קרן", glowFade: "דעיכת מרחק", nearFadeStart: "דעיכה קרובה",
+                fieldBase: "בסיס שדה", fieldStrength: "עוצמת שדה", emissionGain: "הגברת פליטה",
             },
             it: {
                 appName: "Kerach Go",
@@ -2881,6 +3176,21 @@
                 maxSteps: "Passi Massimi", maxDist: "Distanza Massima", stepBase: "Base Passo", stepMultiplier: "Moltiplicatore Passo",
                 lightGlowScale: "Scala Bagliore Luce", wallColor: "Colore Parete", wallBrightness: "Luminosità Parete",
                 glowColor: "Colore Bagliore", glowBrightness: "Luminosità Bagliore", toneMapDivisor: "Divisore Mappatura Toni",
+                digitalCave: "Grotta Digitale",
+                lookAhead: "Anticipo Sguardo", lookAheadVariation: "Variazione Anticipo", lookAheadFrequency: "Frequenza Anticipo Sguardo",
+                cameraSpeed: "Velocità Camera", driftAmplitude: "Ampiezza Deriva",
+                driftXFrequency: "Frequenza Deriva X", driftYFrequency: "Frequenza Deriva Y",
+                sideShiftAmplitude: "Ampiezza Spostamento Laterale", sideShiftFrequency: "Frequenza Spostamento Laterale", sideShiftEdge: "Bordo Spostamento Laterale",
+                fractalTimeScale: "Scala Temporale Frattale", trailSpeed: "Velocità Scia", fractalSteps: "Passi Frattali",
+                patternScale: "Scala Pattern", patternPeriod: "Periodo Pattern",
+                divisorMin: "Divisore Minimo", divisorMax: "Divisore Massimo", trailFrequency: "Frequenza Scia",
+                layerPhase: "Fase Livello", stripeWeight: "Peso Striscia", lineSharpness: "Nitidezza Linea",
+                voronoiScale: "Scala Voronoi", voronoiDepth: "Profondità Voronoi", voronoiSoftness: "Morbidezza Voronoi",
+                corridorYOffset: "Offset Corridoio Y", corridorSegmentLength: "Lunghezza Segmento Corridoio",
+                foldIterations: "Iterazioni Piega", foldOffset: "Offset Piega", foldAngle: "Angolo Piega", quarterAngle: "Angolo Incrociato",
+                shellWidth: "Larghezza Guscio", shellHeight: "Altezza Guscio", shellDepth: "Profondità Guscio",
+                surfaceEpsilon: "Epsilon Superficie", rayJitter: "Jitter Raggio", glowFade: "Dissolvenza Distanza", nearFadeStart: "Dissolvenza Vicina",
+                fieldBase: "Base Campo", fieldStrength: "Intensità Campo", emissionGain: "Guadagno Emissione",
             },
             es: {
                 appName: "Kerach Go",
@@ -3004,6 +3314,21 @@
                 maxSteps: "Pasos Máximos", maxDist: "Distancia Máxima", stepBase: "Base de Paso", stepMultiplier: "Multiplicador de Paso",
                 lightGlowScale: "Escala de Brillo de Luz", wallColor: "Color de Pared", wallBrightness: "Brillo de Pared",
                 glowColor: "Color de Brillo", glowBrightness: "Brillo del Resplandor", toneMapDivisor: "Divisor de Mapeo de Tonos",
+                digitalCave: "Cueva Digital",
+                lookAhead: "Anticipación", lookAheadVariation: "Variación de Anticipación", lookAheadFrequency: "Frecuencia de Anticipación",
+                cameraSpeed: "Velocidad de Cámara", driftAmplitude: "Amplitud de Deriva",
+                driftXFrequency: "Frecuencia de Deriva X", driftYFrequency: "Frecuencia de Deriva Y",
+                sideShiftAmplitude: "Amplitud de Desplazamiento Lateral", sideShiftFrequency: "Frecuencia de Desplazamiento Lateral", sideShiftEdge: "Borde de Desplazamiento Lateral",
+                fractalTimeScale: "Escala de Tiempo Fractal", trailSpeed: "Velocidad de Estela", fractalSteps: "Pasos Fractales",
+                patternScale: "Escala de Patrón", patternPeriod: "Período de Patrón",
+                divisorMin: "Divisor Mínimo", divisorMax: "Divisor Máximo", trailFrequency: "Frecuencia de Estela",
+                layerPhase: "Fase de Capa", stripeWeight: "Peso de Franja", lineSharpness: "Nitidez de Línea",
+                voronoiScale: "Escala de Voronoi", voronoiDepth: "Profundidad de Voronoi", voronoiSoftness: "Suavidad de Voronoi",
+                corridorYOffset: "Desplazamiento de Corredor Y", corridorSegmentLength: "Longitud de Segmento de Corredor",
+                foldIterations: "Iteraciones de Pliegue", foldOffset: "Desplazamiento de Pliegue", foldAngle: "Ángulo de Pliegue", quarterAngle: "Ángulo Cruzado",
+                shellWidth: "Ancho de Cáscara", shellHeight: "Alto de Cáscara", shellDepth: "Profundidad de Cáscara",
+                surfaceEpsilon: "Épsilon de Superficie", rayJitter: "Fluctuación de Rayo", glowFade: "Desvanecimiento de Distancia", nearFadeStart: "Desvanecimiento Cercano",
+                fieldBase: "Base de Campo", fieldStrength: "Intensidad de Campo", emissionGain: "Ganancia de Emisión",
             },
             pt: {
                 appName: "Kerach Go",
@@ -3127,6 +3452,21 @@
                 maxSteps: "Passos Máximos", maxDist: "Distância Máxima", stepBase: "Base do Passo", stepMultiplier: "Multiplicador de Passo",
                 lightGlowScale: "Escala de Brilho da Luz", wallColor: "Cor da Parede", wallBrightness: "Brilho da Parede",
                 glowColor: "Cor do Brilho", glowBrightness: "Brilho do Resplendor", toneMapDivisor: "Divisor de Mapeamento de Tons",
+                digitalCave: "Caverna Digital",
+                lookAhead: "Antecipação", lookAheadVariation: "Variação de Antecipação", lookAheadFrequency: "Frequência de Antecipação",
+                cameraSpeed: "Velocidade da Câmera", driftAmplitude: "Amplitude de Deriva",
+                driftXFrequency: "Frequência de Deriva X", driftYFrequency: "Frequência de Deriva Y",
+                sideShiftAmplitude: "Amplitude de Deslocamento Lateral", sideShiftFrequency: "Frequência de Deslocamento Lateral", sideShiftEdge: "Borda de Deslocamento Lateral",
+                fractalTimeScale: "Escala de Tempo Fractal", trailSpeed: "Velocidade do Rastro", fractalSteps: "Passos Fractais",
+                patternScale: "Escala de Padrão", patternPeriod: "Período de Padrão",
+                divisorMin: "Divisor Mínimo", divisorMax: "Divisor Máximo", trailFrequency: "Frequência do Rastro",
+                layerPhase: "Fase da Camada", stripeWeight: "Peso da Listra", lineSharpness: "Nitidez da Linha",
+                voronoiScale: "Escala de Voronoi", voronoiDepth: "Profundidade de Voronoi", voronoiSoftness: "Suavidade de Voronoi",
+                corridorYOffset: "Deslocamento do Corredor Y", corridorSegmentLength: "Comprimento do Segmento do Corredor",
+                foldIterations: "Iterações de Dobra", foldOffset: "Deslocamento de Dobra", foldAngle: "Ângulo de Dobra", quarterAngle: "Ângulo Cruzado",
+                shellWidth: "Largura da Casca", shellHeight: "Altura da Casca", shellDepth: "Profundidade da Casca",
+                surfaceEpsilon: "Épsilon de Superfície", rayJitter: "Instabilidade do Raio", glowFade: "Esmaecimento de Distância", nearFadeStart: "Esmaecimento Próximo",
+                fieldBase: "Base do Campo", fieldStrength: "Intensidade do Campo", emissionGain: "Ganho de Emissão",
             },
             ja: {
                 appName: "Kerach Go", controls: "コントロール", shader: "シェーダー", palette: "パレット", mix: "ミックス",
@@ -3248,6 +3588,21 @@
                 maxSteps: "最大ステップ数", maxDist: "最大距離", stepBase: "ステップ基本値", stepMultiplier: "ステップ乗数",
                 lightGlowScale: "光の輝きスケール", wallColor: "壁の色", wallBrightness: "壁の明るさ",
                 glowColor: "輝きの色", glowBrightness: "輝きの明るさ", toneMapDivisor: "トーンマップ除数",
+                digitalCave: "デジタルケイブ",
+                lookAhead: "先読み", lookAheadVariation: "先読みの変動", lookAheadFrequency: "先読み周波数",
+                cameraSpeed: "カメラ速度", driftAmplitude: "ドリフト振幅",
+                driftXFrequency: "ドリフト周波数X", driftYFrequency: "ドリフト周波数Y",
+                sideShiftAmplitude: "横シフト振幅", sideShiftFrequency: "横シフト周波数", sideShiftEdge: "横シフトエッジ",
+                fractalTimeScale: "フラクタル時間スケール", trailSpeed: "トレイル速度", fractalSteps: "フラクタルステップ",
+                patternScale: "パターンスケール", patternPeriod: "パターン周期",
+                divisorMin: "最小除数", divisorMax: "最大除数", trailFrequency: "トレイル周波数",
+                layerPhase: "レイヤー位相", stripeWeight: "ストライプ重み", lineSharpness: "線の鋭さ",
+                voronoiScale: "ボロノイスケール", voronoiDepth: "ボロノイ深度", voronoiSoftness: "ボロノイの柔らかさ",
+                corridorYOffset: "通路Yオフセット", corridorSegmentLength: "通路セグメント長",
+                foldIterations: "折り畳み反復回数", foldOffset: "折り畳みオフセット", foldAngle: "折り畳み角度", quarterAngle: "交差角度",
+                shellWidth: "シェル幅", shellHeight: "シェル高さ", shellDepth: "シェル奥行き",
+                surfaceEpsilon: "表面イプシロン", rayJitter: "レイジッター", glowFade: "距離フェード", nearFadeStart: "近接フェード",
+                fieldBase: "フィールド基本値", fieldStrength: "フィールド強度", emissionGain: "放射ゲイン",
             },
             yue: {
                 appName: "Kerach Go", controls: "控制", shader: "着色器", palette: "調色盤", mix: "混合",
@@ -3367,6 +3722,21 @@
                 maxSteps: "最大步數", maxDist: "最大距離", stepBase: "步進基礎值", stepMultiplier: "步進乘數",
                 lightGlowScale: "光暈比例", wallColor: "牆壁顏色", wallBrightness: "牆壁亮度",
                 glowColor: "光暈顏色", glowBrightness: "光暈亮度", toneMapDivisor: "色調映射除數",
+                digitalCave: "數位洞穴",
+                lookAhead: "前瞻", lookAheadVariation: "前瞻變化", lookAheadFrequency: "前瞻頻率",
+                cameraSpeed: "相機速度", driftAmplitude: "漂移振幅",
+                driftXFrequency: "漂移頻率X", driftYFrequency: "漂移頻率Y",
+                sideShiftAmplitude: "側移振幅", sideShiftFrequency: "側移頻率", sideShiftEdge: "側移邊緣",
+                fractalTimeScale: "碎形時間比例", trailSpeed: "軌跡速度", fractalSteps: "碎形步數",
+                patternScale: "圖案比例", patternPeriod: "圖案週期",
+                divisorMin: "最小除數", divisorMax: "最大除數", trailFrequency: "軌跡頻率",
+                layerPhase: "層相位", stripeWeight: "條紋權重", lineSharpness: "線條銳利度",
+                voronoiScale: "沃羅諾伊比例", voronoiDepth: "沃羅諾伊深度", voronoiSoftness: "沃羅諾伊柔和度",
+                corridorYOffset: "走廊Y偏移", corridorSegmentLength: "走廊分段長度",
+                foldIterations: "摺疊疊代次數", foldOffset: "摺疊偏移", foldAngle: "摺疊角度", quarterAngle: "交叉角度",
+                shellWidth: "外殼寬度", shellHeight: "外殼高度", shellDepth: "外殼深度",
+                surfaceEpsilon: "表面極小值", rayJitter: "光線抖動", glowFade: "距離衰減", nearFadeStart: "近距衰減",
+                fieldBase: "場基礎值", fieldStrength: "場強度", emissionGain: "發射增益",
             }
         };
 
@@ -4015,6 +4385,7 @@
 [Formless](https://www.shadertoy.com/view/Ncy3R3) by [noztol](https://www.shadertoy.com/user/noztol)
 [Neon Kaleidoscope](https://codepen.io/editor/sabosugi/pen/01a02f92-c5a4-7680-9919-88d6778ba369) by [Sabo Sugi](https://codepen.io/sabosugi)
 [Happy Glow Cruise](https://www.shadertoy.com/view/3ccyD7) by [diatribes](https://www.shadertoy.com/user/diatribes)
+[Fly in Digital Cave](https://codepen.io/editor/sabosugi/pen/01a05d05-8b0a-7e39-a456-6aeaa576ff84) by [Sabo Sugi](https://codepen.io/sabosugi)
         `;
 
         function CreditHighlightHover({ children, href, className }) {
@@ -4864,6 +5235,56 @@
                         uHue: { value: 0.0 },
                         uSaturation: { value: 1.0 },
                     });
+                } else if (type === 'digitalCave') {
+                    baseFragment = digitalCaveFragShader;
+                    Object.assign(uniforms, {
+                        uCameraFov: { value: 0.70 },
+                        uLookAhead: { value: 6.0 },
+                        uLookAheadVariation: { value: 3.0 },
+                        uLookAheadFrequency: { value: 0.10 },
+                        uCameraSpeed: { value: 5.0 },
+                        uDriftAmplitude: { value: 10.0 },
+                        uDriftXFrequency: { value: 0.10 },
+                        uDriftYFrequency: { value: 0.05 },
+                        uSideShiftAmplitude: { value: 10.0 },
+                        uSideShiftFrequency: { value: 0.02 },
+                        uSideShiftEdge: { value: 0.50 },
+                        uFractalTimeScale: { value: 7.0 },
+                        uTrailSpeed: { value: 0.018 },
+                        uFractalSteps: { value: 7 },
+                        uPatternScale: { value: 0.20 },
+                        uPatternPeriod: { value: 10.0 },
+                        uDivisorMin: { value: 0.25 },
+                        uDivisorMax: { value: 2.0 },
+                        uTrailFrequency: { value: 0.05 },
+                        uLayerPhase: { value: 0.30 },
+                        uStripeWeight: { value: 0.70 },
+                        uLineSharpness: { value: 10.0 },
+                        uVoronoiScale: { value: 3.18 },
+                        uVoronoiDepth: { value: -0.95 },
+                        uVoronoiSoftness: { value: 0.18 },
+                        uCorridorYOffset: { value: 3.0 },
+                        uCorridorSegmentLength: { value: 20.0 },
+                        uFoldIterations: { value: 5 },
+                        uFoldOffset: { value: 1.0 },
+                        uFoldAngle: { value: -45.0 },
+                        uQuarterAngle: { value: 90.0 },
+                        uShellHalfSize: { value: new THREE.Vector3(5.0, 5.0, 10.0) },
+                        uDistanceScale: { value: 0.70 },
+                        uMarchSteps: { value: 80 },
+                        uSurfaceEpsilon: { value: 0.001 },
+                        uRayJitter: { value: 0.30 },
+                        uGlowFade: { value: 0.0015 },
+                        uNearFadeStart: { value: 5.0 },
+                        uFieldBase: { value: 3.0 },
+                        uFieldStrength: { value: 2.0 },
+                        uEmissionGain: { value: 0.50 },
+                        uFractalColor: { value: new THREE.Vector3(0.039, 0.761, 1.000) },
+                        uGlowColor: { value: new THREE.Vector3(0.024242, 0.193939, 1.000) },
+                        uGlowIntensity: { value: 1.65 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                    });
                 } else {
                     baseFragment = meltFragShader;
                     Object.assign(uniforms, {
@@ -5383,6 +5804,61 @@
                             mat.uniforms.uWallColor.value.set(wr, wg, wb);
                             const [glr, glg, glb] = hexToRgbArray(cur.glowCruise.glowColor);
                             mat.uniforms.uGlowColor.value.set(glr, glg, glb);
+                        } else if (cur.activeShader === 'digitalCave') {
+                            // Master speed pre-multiplies elapsed time (like balatro): the
+                            // shader's own fractalTimeScale/cameraSpeed rates then apply on
+                            // top of that, so Speed and Freeze/manual-time both work correctly.
+                            mat.uniforms.uTime.value = elapsed * cur.digitalCave.speed;
+                            mat.uniforms.uCameraFov.value = cur.digitalCave.fov;
+                            mat.uniforms.uLookAhead.value = cur.digitalCave.lookAhead;
+                            mat.uniforms.uLookAheadVariation.value = cur.digitalCave.lookAheadVariation;
+                            mat.uniforms.uLookAheadFrequency.value = cur.digitalCave.lookAheadFrequency;
+                            mat.uniforms.uCameraSpeed.value = cur.digitalCave.cameraSpeed;
+                            mat.uniforms.uDriftAmplitude.value = cur.digitalCave.driftAmplitude;
+                            mat.uniforms.uDriftXFrequency.value = cur.digitalCave.driftXFrequency;
+                            mat.uniforms.uDriftYFrequency.value = cur.digitalCave.driftYFrequency;
+                            mat.uniforms.uSideShiftAmplitude.value = cur.digitalCave.sideShiftAmplitude;
+                            mat.uniforms.uSideShiftFrequency.value = cur.digitalCave.sideShiftFrequency;
+                            mat.uniforms.uSideShiftEdge.value = cur.digitalCave.sideShiftEdge;
+                            mat.uniforms.uFractalTimeScale.value = cur.digitalCave.fractalTimeScale;
+                            mat.uniforms.uTrailSpeed.value = cur.digitalCave.trailSpeed;
+                            mat.uniforms.uFractalSteps.value = Math.round(cur.digitalCave.fractalSteps);
+                            mat.uniforms.uPatternScale.value = cur.digitalCave.patternScale;
+                            mat.uniforms.uPatternPeriod.value = cur.digitalCave.patternPeriod;
+                            mat.uniforms.uDivisorMin.value = cur.digitalCave.divisorMin;
+                            mat.uniforms.uDivisorMax.value = cur.digitalCave.divisorMax;
+                            mat.uniforms.uTrailFrequency.value = cur.digitalCave.trailFrequency;
+                            mat.uniforms.uLayerPhase.value = cur.digitalCave.layerPhase;
+                            mat.uniforms.uStripeWeight.value = cur.digitalCave.stripeWeight;
+                            mat.uniforms.uLineSharpness.value = cur.digitalCave.lineSharpness;
+                            mat.uniforms.uVoronoiScale.value = cur.digitalCave.voronoiScale;
+                            mat.uniforms.uVoronoiDepth.value = cur.digitalCave.voronoiDepth;
+                            mat.uniforms.uVoronoiSoftness.value = cur.digitalCave.voronoiSoftness;
+                            mat.uniforms.uCorridorYOffset.value = cur.digitalCave.corridorYOffset;
+                            mat.uniforms.uCorridorSegmentLength.value = cur.digitalCave.corridorSegmentLength;
+                            mat.uniforms.uFoldIterations.value = Math.round(cur.digitalCave.foldIterations);
+                            mat.uniforms.uFoldOffset.value = cur.digitalCave.foldOffset;
+                            mat.uniforms.uFoldAngle.value = cur.digitalCave.foldAngle;
+                            mat.uniforms.uQuarterAngle.value = cur.digitalCave.quarterAngle;
+                            mat.uniforms.uShellHalfSize.value.set(
+                                cur.digitalCave.shellWidth,
+                                cur.digitalCave.shellHeight,
+                                cur.digitalCave.shellDepth
+                            );
+                            mat.uniforms.uDistanceScale.value = cur.digitalCave.distanceScale;
+                            mat.uniforms.uMarchSteps.value = Math.round(cur.digitalCave.marchSteps);
+                            mat.uniforms.uSurfaceEpsilon.value = cur.digitalCave.surfaceEpsilon;
+                            mat.uniforms.uRayJitter.value = cur.digitalCave.rayJitter;
+                            mat.uniforms.uGlowFade.value = cur.digitalCave.glowFade;
+                            mat.uniforms.uNearFadeStart.value = cur.digitalCave.nearFadeStart;
+                            mat.uniforms.uFieldBase.value = cur.digitalCave.fieldBase;
+                            mat.uniforms.uFieldStrength.value = cur.digitalCave.fieldStrength;
+                            mat.uniforms.uEmissionGain.value = cur.digitalCave.emissionGain;
+                            mat.uniforms.uGlowIntensity.value = cur.digitalCave.glowIntensity;
+                            mat.uniforms.uHue.value = cur.digitalCave.hue;
+                            mat.uniforms.uSaturation.value = cur.digitalCave.saturation;
+                            mat.uniforms.uFractalColor.value.set(...cur.digitalCave.fractalColor);
+                            mat.uniforms.uGlowColor.value.set(...cur.digitalCave.glowColor);
                         }
                     }
 
@@ -5756,6 +6232,63 @@
                     hue: 0,
                     saturation: 1.0,
                 },
+                digitalCave: {
+                    speed: 1.0,
+                    // Camera
+                    fov: 0.70,
+                    lookAhead: 6.0,
+                    lookAheadVariation: 3.0,
+                    lookAheadFrequency: 0.10,
+                    // Flight
+                    cameraSpeed: 5.0,
+                    driftAmplitude: 10.0,
+                    driftXFrequency: 0.10,
+                    driftYFrequency: 0.05,
+                    sideShiftAmplitude: 10.0,
+                    sideShiftFrequency: 0.02,
+                    sideShiftEdge: 0.50,
+                    // Fractal
+                    fractalTimeScale: 7.0,
+                    trailSpeed: 0.018,
+                    fractalSteps: 7,
+                    patternScale: 0.20,
+                    patternPeriod: 10.0,
+                    divisorMin: 0.25,
+                    divisorMax: 2.0,
+                    trailFrequency: 0.05,
+                    layerPhase: 0.30,
+                    stripeWeight: 0.70,
+                    lineSharpness: 10.0,
+                    voronoiScale: 3.18,
+                    voronoiDepth: -0.95,
+                    voronoiSoftness: 0.18,
+                    // Geometry
+                    corridorYOffset: 3.0,
+                    corridorSegmentLength: 20.0,
+                    foldIterations: 5,
+                    foldOffset: 1.0,
+                    foldAngle: -45.0,
+                    quarterAngle: 90.0,
+                    shellWidth: 5.0,
+                    shellHeight: 5.0,
+                    shellDepth: 10.0,
+                    distanceScale: 0.70,
+                    // Raymarch
+                    marchSteps: 80,
+                    surfaceEpsilon: 0.001,
+                    rayJitter: 0.30,
+                    glowFade: 0.0015,
+                    nearFadeStart: 5.0,
+                    fieldBase: 3.0,
+                    fieldStrength: 2.0,
+                    emissionGain: 0.50,
+                    // Colors
+                    fractalColor: [0.039, 0.761, 1.000],
+                    glowColor: [0.024242, 0.193939, 1.000],
+                    glowIntensity: 1.65,
+                    hue: 0,
+                    saturation: 1.0,
+                },
                 blurStrength: 0.0,
                 isFrozen: false,
                 manualTime: 0,
@@ -5999,7 +6532,7 @@
                         <div className="space-y-3 pt-4 border-t border-white/10">
                             <StaticSelect
                                 label={t('activeShader')}
-                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi', 'chromaticLight', 'halo', 'chromaticUniverse', 'membranes', 'neonKaleidoscope', 'glowCruise'].map(v => ({
+                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi', 'chromaticLight', 'halo', 'chromaticUniverse', 'membranes', 'neonKaleidoscope', 'glowCruise', 'digitalCave'].map(v => ({
                                     value: v,
                                     label: v === 'luminousResin' ? t('luminousResin') : t(v),
                                 }))}
@@ -7339,6 +7872,135 @@
                                         <ColorPicker
                                             color={settings.glowCruise.glowColor}
                                             onChange={h => updateNested('glowCruise', 'glowColor', h)}
+                                        />
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* DIGITAL CAVE SHADER */}
+                        {settings.activeShader === 'digitalCave' && (
+                            <>
+                                <ShaderSlider label={t('speed')} value={settings.digitalCave.speed} min={0} max={5} step={0.05}
+                                    update={v => updateNested('digitalCave', 'speed', v)} dir={dir} />
+
+                                {/* Camera */}
+                                <ShaderSlider label={t('fov')} value={settings.digitalCave.fov} min={0.20} max={2.00} step={0.01}
+                                    update={v => updateNested('digitalCave', 'fov', v)} dir={dir} />
+                                <ShaderSlider label={t('lookAhead')} value={settings.digitalCave.lookAhead} min={0.5} max={20.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'lookAhead', v)} dir={dir} />
+                                <ShaderSlider label={t('lookAheadVariation')} value={settings.digitalCave.lookAheadVariation} min={0.0} max={10.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'lookAheadVariation', v)} dir={dir} />
+                                <ShaderSlider label={t('lookAheadFrequency')} value={settings.digitalCave.lookAheadFrequency} min={0.0} max={0.5} step={0.001}
+                                    update={v => updateNested('digitalCave', 'lookAheadFrequency', v)} dir={dir} />
+
+                                {/* Flight */}
+                                <ShaderSlider label={t('cameraSpeed')} value={settings.digitalCave.cameraSpeed} min={0.0} max={15.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'cameraSpeed', v)} dir={dir} />
+                                <ShaderSlider label={t('driftAmplitude')} value={settings.digitalCave.driftAmplitude} min={0.0} max={25.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'driftAmplitude', v)} dir={dir} />
+                                <ShaderSlider label={t('driftXFrequency')} value={settings.digitalCave.driftXFrequency} min={0.0} max={0.5} step={0.001}
+                                    update={v => updateNested('digitalCave', 'driftXFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('driftYFrequency')} value={settings.digitalCave.driftYFrequency} min={0.0} max={0.5} step={0.001}
+                                    update={v => updateNested('digitalCave', 'driftYFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('sideShiftAmplitude')} value={settings.digitalCave.sideShiftAmplitude} min={0.0} max={30.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'sideShiftAmplitude', v)} dir={dir} />
+                                <ShaderSlider label={t('sideShiftFrequency')} value={settings.digitalCave.sideShiftFrequency} min={0.001} max={0.1} step={0.001}
+                                    update={v => updateNested('digitalCave', 'sideShiftFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('sideShiftEdge')} value={settings.digitalCave.sideShiftEdge} min={0.05} max={1.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'sideShiftEdge', v)} dir={dir} />
+
+                                {/* Fractal */}
+                                <ShaderSlider label={t('fractalTimeScale')} value={settings.digitalCave.fractalTimeScale} min={0.0} max={20.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'fractalTimeScale', v)} dir={dir} />
+                                <ShaderSlider label={t('trailSpeed')} value={settings.digitalCave.trailSpeed} min={-0.2} max={0.2} step={0.001}
+                                    update={v => updateNested('digitalCave', 'trailSpeed', v)} dir={dir} />
+                                <ShaderSlider label={t('fractalSteps')} value={settings.digitalCave.fractalSteps} min={2} max={12} step={1}
+                                    update={v => updateNested('digitalCave', 'fractalSteps', v)} dir={dir} />
+                                <ShaderSlider label={t('patternScale')} value={settings.digitalCave.patternScale} min={0.01} max={1.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'patternScale', v)} dir={dir} />
+                                <ShaderSlider label={t('patternPeriod')} value={settings.digitalCave.patternPeriod} min={1.0} max={30.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'patternPeriod', v)} dir={dir} />
+                                <ShaderSlider label={t('divisorMin')} value={settings.digitalCave.divisorMin} min={0.01} max={2.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'divisorMin', v)} dir={dir} />
+                                <ShaderSlider label={t('divisorMax')} value={settings.digitalCave.divisorMax} min={0.1} max={5.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'divisorMax', v)} dir={dir} />
+                                <ShaderSlider label={t('trailFrequency')} value={settings.digitalCave.trailFrequency} min={0.001} max={0.3} step={0.001}
+                                    update={v => updateNested('digitalCave', 'trailFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('layerPhase')} value={settings.digitalCave.layerPhase} min={0.0} max={2.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'layerPhase', v)} dir={dir} />
+                                <ShaderSlider label={t('stripeWeight')} value={settings.digitalCave.stripeWeight} min={0.0} max={2.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'stripeWeight', v)} dir={dir} />
+                                <ShaderSlider label={t('lineSharpness')} value={settings.digitalCave.lineSharpness} min={1.0} max={40.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'lineSharpness', v)} dir={dir} />
+                                <ShaderSlider label={t('voronoiScale')} value={settings.digitalCave.voronoiScale} min={0.1} max={10.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'voronoiScale', v)} dir={dir} />
+                                <ShaderSlider label={t('voronoiDepth')} value={settings.digitalCave.voronoiDepth} min={-3.0} max={3.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'voronoiDepth', v)} dir={dir} />
+                                <ShaderSlider label={t('voronoiSoftness')} value={settings.digitalCave.voronoiSoftness} min={0.0} max={0.95} step={0.01}
+                                    update={v => updateNested('digitalCave', 'voronoiSoftness', v)} dir={dir} />
+
+                                {/* Geometry */}
+                                <ShaderSlider label={t('corridorYOffset')} value={settings.digitalCave.corridorYOffset} min={0.0} max={10.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'corridorYOffset', v)} dir={dir} />
+                                <ShaderSlider label={t('corridorSegmentLength')} value={settings.digitalCave.corridorSegmentLength} min={2.0} max={50.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'corridorSegmentLength', v)} dir={dir} />
+                                <ShaderSlider label={t('foldIterations')} value={settings.digitalCave.foldIterations} min={1} max={10} step={1}
+                                    update={v => updateNested('digitalCave', 'foldIterations', v)} dir={dir} />
+                                <ShaderSlider label={t('foldOffset')} value={settings.digitalCave.foldOffset} min={0.1} max={3.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'foldOffset', v)} dir={dir} />
+                                <ShaderSlider label={t('foldAngle')} value={settings.digitalCave.foldAngle} min={-180.0} max={180.0} step={1}
+                                    update={v => updateNested('digitalCave', 'foldAngle', v)} dir={dir} />
+                                <ShaderSlider label={t('quarterAngle')} value={settings.digitalCave.quarterAngle} min={-180.0} max={180.0} step={1}
+                                    update={v => updateNested('digitalCave', 'quarterAngle', v)} dir={dir} />
+                                <ShaderSlider label={t('shellWidth')} value={settings.digitalCave.shellWidth} min={1.0} max={15.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'shellWidth', v)} dir={dir} />
+                                <ShaderSlider label={t('shellHeight')} value={settings.digitalCave.shellHeight} min={1.0} max={15.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'shellHeight', v)} dir={dir} />
+                                <ShaderSlider label={t('shellDepth')} value={settings.digitalCave.shellDepth} min={1.0} max={30.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'shellDepth', v)} dir={dir} />
+                                <ShaderSlider label={t('distanceScale')} value={settings.digitalCave.distanceScale} min={0.05} max={2.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'distanceScale', v)} dir={dir} />
+
+                                {/* Raymarch / Post Processing */}
+                                <ShaderSlider label={t('marchSteps')} value={settings.digitalCave.marchSteps} min={20} max={160} step={1}
+                                    update={v => updateNested('digitalCave', 'marchSteps', v)} dir={dir} />
+                                <ShaderSlider label={t('surfaceEpsilon')} value={settings.digitalCave.surfaceEpsilon} min={0.0001} max={0.02} step={0.0001}
+                                    update={v => updateNested('digitalCave', 'surfaceEpsilon', v)} dir={dir} />
+                                <ShaderSlider label={t('rayJitter')} value={settings.digitalCave.rayJitter} min={0.0} max={0.8} step={0.01}
+                                    update={v => updateNested('digitalCave', 'rayJitter', v)} dir={dir} />
+                                <ShaderSlider label={t('glowFade')} value={settings.digitalCave.glowFade} min={0.0} max={0.01} step={0.0001}
+                                    update={v => updateNested('digitalCave', 'glowFade', v)} dir={dir} />
+                                <ShaderSlider label={t('nearFadeStart')} value={settings.digitalCave.nearFadeStart} min={0.0} max={20.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'nearFadeStart', v)} dir={dir} />
+                                <ShaderSlider label={t('fieldBase')} value={settings.digitalCave.fieldBase} min={0.1} max={10.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'fieldBase', v)} dir={dir} />
+                                <ShaderSlider label={t('fieldStrength')} value={settings.digitalCave.fieldStrength} min={0.0} max={10.0} step={0.1}
+                                    update={v => updateNested('digitalCave', 'fieldStrength', v)} dir={dir} />
+                                <ShaderSlider label={t('emissionGain')} value={settings.digitalCave.emissionGain} min={0.0} max={2.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'emissionGain', v)} dir={dir} />
+
+                                {/* Color / Hue-Saturation */}
+                                <ShaderSlider label={t('glowIntensity')} value={settings.digitalCave.glowIntensity} min={0.0} max={5.0} step={0.01}
+                                    update={v => updateNested('digitalCave', 'glowIntensity', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.digitalCave.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('digitalCave', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.digitalCave.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('digitalCave', 'saturation', v)} dir={dir} />
+
+                                <div className="flex flex-wrap gap-6 mt-4">
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('fractalColor')}</span>
+                                        <ColorPicker
+                                            color={rgbArrayToHex(settings.digitalCave.fractalColor)}
+                                            onChange={h => updateNested('digitalCave', 'fractalColor', hexToRgbArray(h))}
+                                        />
+                                    </div>
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('glowColor')}</span>
+                                        <ColorPicker
+                                            color={rgbArrayToHex(settings.digitalCave.glowColor)}
+                                            onChange={h => updateNested('digitalCave', 'glowColor', hexToRgbArray(h))}
                                         />
                                     </div>
                                 </div>
