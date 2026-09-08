@@ -108,6 +108,8 @@ The app is fully localized into:
 
 [Fly in Digital Cave](https://codepen.io/editor/sabosugi/pen/01a05d05-8b0a-7e39-a456-6aeaa576ff84) by [Sabo Sugi](https://codepen.io/sabosugi)
 
+[Neon Honeycombs](https://shadertoy.com/view/f3t3z4) by [noztol](https://www.shadertoy.com/user/noztol)
+
 ### Shader Modification & Attribution Disclosure
 
 Regarding the shaders distributed under the Creative Commons Attribution-NonCommercial-ShareAlike (CC BY-NC-SA 3.0 / CC BY-NC-SA 4.0) licenses:

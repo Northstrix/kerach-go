@@ -2771,6 +2771,178 @@
         }
         `;
 
+        const neonHoneycombsFragShader = `precision highp float;
+
+        uniform vec2 uResolution;
+        uniform float uTime;
+
+        uniform float uFlightSpeed;
+        uniform float uLookAheadDistance;
+        uniform float uZSpacing;
+        uniform float uPathFreqX;
+        uniform float uPathAmpX;
+        uniform float uPathFreqY;
+        uniform float uPathAmpY;
+        uniform float uHexScale;
+        uniform float uCameraBlendStart;
+        uniform float uCameraBlendEnd;
+
+        uniform float uHexBorderRadius;
+        uniform float uWallThickness;
+        uniform float uRingThickness;
+        uniform float uDistanceScale;
+
+        uniform float uTrailSpeed;
+        uniform float uTrailEdgeStart;
+        uniform float uTrailEdgeEnd;
+
+        uniform float uColorShiftSpeed;
+        uniform float uColorDepthFrequency;
+        uniform float uColorXFrequency;
+        uniform float uColorSmoothness;
+        uniform vec4 uColors[10];
+        uniform float uColorCount;
+
+        uniform float uGlowIntensity;
+        uniform float uGlowEpsilon;
+        uniform float uGlowMix;
+        uniform float uFogDensity;
+        uniform vec3 uBackgroundColor;
+        uniform float uGamma;
+
+        uniform float uMarchSteps;
+        uniform float uMaxDist;
+        uniform float uSurfaceEpsilon;
+
+        uniform float uHue;
+        uniform float uSaturation;
+
+        ${hueSatHelpers}
+
+        vec3 nhGlow = vec3(0.0);
+
+        float hash31(vec3 p3) {
+            p3  = fract(p3 * .1031);
+            p3 += dot(p3, p3.yzx + 33.33);
+            return fract((p3.x + p3.y) * p3.z);
+        }
+
+        vec4 HexCoords(vec2 uv) {
+            vec2 r = vec2(1.0, 1.7320508);
+            vec2 h = r * 0.5;
+
+            vec2 a = mod(uv, r) - h;
+            vec2 b = mod(uv - h, r) - h;
+
+            vec2 gv = dot(a, a) < dot(b, b) ? a : b;
+            vec2 id = uv - gv;
+
+            return vec4(gv, id);
+        }
+
+        vec2 getCameraXY(float z) {
+            float segment = floor(z / uZSpacing);
+            float fraction = fract(z / uZSpacing);
+
+            float zA = segment * uZSpacing;
+            float zB = (segment + 1.0) * uZSpacing;
+
+            vec2 targetA = vec2(sin(zA * uPathFreqX) * uPathAmpX, cos(zA * uPathFreqY) * uPathAmpY);
+            vec2 targetB = vec2(sin(zB * uPathFreqX) * uPathAmpX, cos(zB * uPathFreqY) * uPathAmpY);
+
+            vec2 centerA = HexCoords(targetA * uHexScale).zw / uHexScale;
+            vec2 centerB = HexCoords(targetB * uHexScale).zw / uHexScale;
+
+            float blend = smoothstep(uCameraBlendStart, uCameraBlendEnd, fraction);
+
+            return mix(centerA, centerB, blend);
+        }
+
+        float HexDist(vec2 p) {
+            p = abs(p);
+            return max(p.x, dot(p, normalize(vec2(1.0, 1.7320508))));
+        }
+
+        vec3 nhPalette(float t) {
+            float m = clamp(fract(t), 0.0, 1.0) * uColorCount;
+            vec3 grad = uColors[0].rgb;
+            for (int i = 1; i < 10; i++) {
+                if (float(i) > uColorCount) break;
+                float mm = clamp((m - float(i - 1)) / max(uColorSmoothness, 0.001), 0.0, 1.0);
+                mm = smoothstep(0.0, 1.0, mm);
+                grad = mix(grad, uColors[i - 1].rgb, mm);
+            }
+            return grad;
+        }
+
+        float GetDist(vec3 p) {
+            vec4 hc = HexCoords(p.xy * uHexScale);
+            float hDist = HexDist(hc.xy);
+
+            float borderDist = abs(hDist - uHexBorderRadius) - uWallThickness;
+
+            float zLocal = fract(p.z / uZSpacing + 0.5) - 0.5;
+            float zDist = abs(zLocal) - uRingThickness;
+
+            float d = max(borderDist, zDist);
+
+            float angle = atan(hc.x, hc.y);
+            float normAngle = (angle + 3.141592) / 6.283185;
+
+            vec3 cellID = vec3(hc.zw, floor((p.z + uZSpacing * 0.5) / uZSpacing));
+            float offset = hash31(cellID);
+
+            float draw = fract(normAngle - uTime * uTrailSpeed + offset);
+            float trail = smoothstep(uTrailEdgeStart, uTrailEdgeEnd, draw);
+
+            float colorPhase = cellID.z * uColorDepthFrequency + cellID.x * uColorXFrequency + uTime * uColorShiftSpeed;
+            vec3 baseCol = nhPalette(colorPhase);
+
+            nhGlow += baseCol * (uGlowIntensity / (d * d + uGlowEpsilon)) * trail;
+
+            return d * uDistanceScale;
+        }
+
+        void main() {
+            vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution.xy) / uResolution.y;
+
+            float camZ = uTime * uFlightSpeed * 2.0;
+            float lookZ = camZ + uLookAheadDistance;
+
+            vec3 ro = vec3(getCameraXY(camZ), camZ);
+            vec3 lookAt = vec3(getCameraXY(lookZ), lookZ);
+
+            vec3 f = normalize(lookAt - ro);
+            vec3 r = normalize(cross(vec3(0.0, 1.0, 0.0), f));
+            vec3 u = cross(f, r);
+
+            vec3 rd = normalize(f + uv.x * r + uv.y * u);
+
+            float d0 = 0.0;
+            for (int i = 0; i < 150; i++) {
+                if (float(i) >= uMarchSteps) break;
+
+                vec3 p = ro + rd * d0;
+                float dS = GetDist(p);
+                d0 += dS;
+                if (d0 > uMaxDist || abs(dS) < uSurfaceEpsilon) break;
+            }
+
+            vec3 col = vec3(0.0);
+            col += nhGlow * uGlowMix;
+            col = mix(col, uBackgroundColor, 1.0 - exp(-uFogDensity * d0 * d0));
+            col = col / (1.0 + col);
+            col = pow(max(col, vec3(0.0)), vec3(1.0 / max(uGamma, 0.001)));
+
+            vec3 hsv = rgb2hsv(clamp(col, 0.0, 1.0));
+            hsv.x = fract(hsv.x + uHue / 360.0);
+            hsv.y = clamp(hsv.y * uSaturation, 0.0, 1.0);
+            col = hsv2rgb(hsv);
+
+            gl_FragColor = vec4(col, 1.0);
+        }
+        `;
+
         // =========================================================================
         // LOCALIZATION
         // =========================================================================
@@ -2915,6 +3087,13 @@
                 shellWidth: "Shell Width", shellHeight: "Shell Height", shellDepth: "Shell Depth",
                 surfaceEpsilon: "Surface Epsilon", rayJitter: "Ray Jitter", glowFade: "Distance Fade", nearFadeStart: "Near Fade",
                 fieldBase: "Field Base", fieldStrength: "Field Strength", emissionGain: "Emission Gain",
+                neonHoneycombs: "Neon Honeycombs",
+                flightSpeed: "Flight Speed", hexScale: "Hex Scale",
+                cameraBlendStart: "Camera Blend Start", cameraBlendEnd: "Camera Blend End",
+                hexBorderRadius: "Hex Border Radius", wallThickness: "Wall Thickness", ringThickness: "Ring Thickness",
+                trailEdgeStart: "Trail Edge Start", trailEdgeEnd: "Trail Edge End",
+                colorDepthFrequency: "Color Depth Frequency", colorXFrequency: "Color X Frequency",
+                colorSmoothness: "Color Smoothness", glowEpsilon: "Glow Epsilon", glowMix: "Glow Mix", fogDensity: "Fog Density",
             },
             he: {
                 appName: "קרח Go",
@@ -3053,6 +3232,13 @@
                 shellWidth: "רוחב מעטפת", shellHeight: "גובה מעטפת", shellDepth: "עומק מעטפת",
                 surfaceEpsilon: "אפסילון משטח", rayJitter: "רעד קרן", glowFade: "דעיכת מרחק", nearFadeStart: "דעיכה קרובה",
                 fieldBase: "בסיס שדה", fieldStrength: "עוצמת שדה", emissionGain: "הגברת פליטה",
+                neonHoneycombs: "כוורות ניאון",
+                flightSpeed: "מהירות טיסה", hexScale: "קנה מידת משושה",
+                cameraBlendStart: "התחלת מיזוג מצלמה", cameraBlendEnd: "סיום מיזוג מצלמה",
+                hexBorderRadius: "רדיוס גבול משושה", wallThickness: "עובי קיר", ringThickness: "עובי טבעת",
+                trailEdgeStart: "התחלת קצה שביל", trailEdgeEnd: "סיום קצה שביל",
+                colorDepthFrequency: "תדירות צבע לפי עומק", colorXFrequency: "תדירות צבע X",
+                colorSmoothness: "חלקות צבע", glowEpsilon: "אפסילון זוהר", glowMix: "מיזוג זוהר", fogDensity: "צפיפות ערפל",
             },
             it: {
                 appName: "Kerach Go",
@@ -3191,6 +3377,13 @@
                 shellWidth: "Larghezza Guscio", shellHeight: "Altezza Guscio", shellDepth: "Profondità Guscio",
                 surfaceEpsilon: "Epsilon Superficie", rayJitter: "Jitter Raggio", glowFade: "Dissolvenza Distanza", nearFadeStart: "Dissolvenza Vicina",
                 fieldBase: "Base Campo", fieldStrength: "Intensità Campo", emissionGain: "Guadagno Emissione",
+                neonHoneycombs: "Nido d'Ape al Neon",
+                flightSpeed: "Velocità di Volo", hexScale: "Scala Esagono",
+                cameraBlendStart: "Inizio Fusione Camera", cameraBlendEnd: "Fine Fusione Camera",
+                hexBorderRadius: "Raggio Bordo Esagono", wallThickness: "Spessore Parete", ringThickness: "Spessore Anello",
+                trailEdgeStart: "Inizio Bordo Scia", trailEdgeEnd: "Fine Bordo Scia",
+                colorDepthFrequency: "Frequenza Colore Profondità", colorXFrequency: "Frequenza Colore X",
+                colorSmoothness: "Morbidezza Colore", glowEpsilon: "Epsilon Bagliore", glowMix: "Mix Bagliore", fogDensity: "Densità Nebbia",
             },
             es: {
                 appName: "Kerach Go",
@@ -3329,6 +3522,13 @@
                 shellWidth: "Ancho de Cáscara", shellHeight: "Alto de Cáscara", shellDepth: "Profundidad de Cáscara",
                 surfaceEpsilon: "Épsilon de Superficie", rayJitter: "Fluctuación de Rayo", glowFade: "Desvanecimiento de Distancia", nearFadeStart: "Desvanecimiento Cercano",
                 fieldBase: "Base de Campo", fieldStrength: "Intensidad de Campo", emissionGain: "Ganancia de Emisión",
+                neonHoneycombs: "Panales de Neón",
+                flightSpeed: "Velocidad de Vuelo", hexScale: "Escala Hexagonal",
+                cameraBlendStart: "Inicio de Mezcla de Cámara", cameraBlendEnd: "Fin de Mezcla de Cámara",
+                hexBorderRadius: "Radio de Borde Hexagonal", wallThickness: "Grosor de Pared", ringThickness: "Grosor de Anillo",
+                trailEdgeStart: "Inicio de Borde de Estela", trailEdgeEnd: "Fin de Borde de Estela",
+                colorDepthFrequency: "Frecuencia de Color por Profundidad", colorXFrequency: "Frecuencia de Color X",
+                colorSmoothness: "Suavidad de Color", glowEpsilon: "Épsilon de Brillo", glowMix: "Mezcla de Brillo", fogDensity: "Densidad de Niebla",
             },
             pt: {
                 appName: "Kerach Go",
@@ -3467,6 +3667,13 @@
                 shellWidth: "Largura da Casca", shellHeight: "Altura da Casca", shellDepth: "Profundidade da Casca",
                 surfaceEpsilon: "Épsilon de Superfície", rayJitter: "Instabilidade do Raio", glowFade: "Esmaecimento de Distância", nearFadeStart: "Esmaecimento Próximo",
                 fieldBase: "Base do Campo", fieldStrength: "Intensidade do Campo", emissionGain: "Ganho de Emissão",
+                neonHoneycombs: "Colmeias de Néon",
+                flightSpeed: "Velocidade de Voo", hexScale: "Escala Hexagonal",
+                cameraBlendStart: "Início da Mescla de Câmera", cameraBlendEnd: "Fim da Mescla de Câmera",
+                hexBorderRadius: "Raio da Borda Hexagonal", wallThickness: "Espessura da Parede", ringThickness: "Espessura do Anel",
+                trailEdgeStart: "Início da Borda do Rastro", trailEdgeEnd: "Fim da Borda do Rastro",
+                colorDepthFrequency: "Frequência de Cor por Profundidade", colorXFrequency: "Frequência de Cor X",
+                colorSmoothness: "Suavidade de Cor", glowEpsilon: "Épsilon de Brilho", glowMix: "Mistura de Brilho", fogDensity: "Densidade de Névoa",
             },
             ja: {
                 appName: "Kerach Go", controls: "コントロール", shader: "シェーダー", palette: "パレット", mix: "ミックス",
@@ -3603,6 +3810,13 @@
                 shellWidth: "シェル幅", shellHeight: "シェル高さ", shellDepth: "シェル奥行き",
                 surfaceEpsilon: "表面イプシロン", rayJitter: "レイジッター", glowFade: "距離フェード", nearFadeStart: "近接フェード",
                 fieldBase: "フィールド基本値", fieldStrength: "フィールド強度", emissionGain: "放射ゲイン",
+                neonHoneycombs: "ネオンハニカム",
+                flightSpeed: "飛行速度", hexScale: "ヘックススケール",
+                cameraBlendStart: "カメラブレンド開始", cameraBlendEnd: "カメラブレンド終了",
+                hexBorderRadius: "ヘックス境界半径", wallThickness: "壁の厚さ", ringThickness: "リングの厚さ",
+                trailEdgeStart: "トレイルエッジ開始", trailEdgeEnd: "トレイルエッジ終了",
+                colorDepthFrequency: "色深度周波数", colorXFrequency: "色X周波数",
+                colorSmoothness: "色の滑らかさ", glowEpsilon: "グローイプシロン", glowMix: "グローミックス", fogDensity: "霧の密度",
             },
             yue: {
                 appName: "Kerach Go", controls: "控制", shader: "着色器", palette: "調色盤", mix: "混合",
@@ -3737,6 +3951,13 @@
                 shellWidth: "外殼寬度", shellHeight: "外殼高度", shellDepth: "外殼深度",
                 surfaceEpsilon: "表面極小值", rayJitter: "光線抖動", glowFade: "距離衰減", nearFadeStart: "近距衰減",
                 fieldBase: "場基礎值", fieldStrength: "場強度", emissionGain: "發射增益",
+                neonHoneycombs: "霓虹蜂巢",
+                flightSpeed: "飛行速度", hexScale: "六邊形比例",
+                cameraBlendStart: "相機混合起點", cameraBlendEnd: "相機混合終點",
+                hexBorderRadius: "六邊形邊界半徑", wallThickness: "牆壁厚度", ringThickness: "圓環厚度",
+                trailEdgeStart: "軌跡邊緣起點", trailEdgeEnd: "軌跡邊緣終點",
+                colorDepthFrequency: "顏色深度頻率", colorXFrequency: "顏色X頻率",
+                colorSmoothness: "顏色平滑度", glowEpsilon: "光暈極小值", glowMix: "光暈混合", fogDensity: "霧氣密度",
             }
         };
 
@@ -4386,6 +4607,7 @@
 [Neon Kaleidoscope](https://codepen.io/editor/sabosugi/pen/01a02f92-c5a4-7680-9919-88d6778ba369) by [Sabo Sugi](https://codepen.io/sabosugi)
 [Happy Glow Cruise](https://www.shadertoy.com/view/3ccyD7) by [diatribes](https://www.shadertoy.com/user/diatribes)
 [Fly in Digital Cave](https://codepen.io/editor/sabosugi/pen/01a05d05-8b0a-7e39-a456-6aeaa576ff84) by [Sabo Sugi](https://codepen.io/sabosugi)
+[Neon Honeycombs](https://shadertoy.com/view/f3t3z4) by [noztol](https://www.shadertoy.com/user/noztol)
         `;
 
         function CreditHighlightHover({ children, href, className }) {
@@ -5285,6 +5507,46 @@
                         uHue: { value: 0.0 },
                         uSaturation: { value: 1.0 },
                     });
+                } else if (type === 'neonHoneycombs') {
+                    baseFragment = neonHoneycombsFragShader;
+                    Object.assign(uniforms, {
+                        uFlightSpeed: { value: 0.6 },
+                        uLookAheadDistance: { value: 1.5 },
+                        uZSpacing: { value: 2.0 },
+                        uPathFreqX: { value: 0.2 },
+                        uPathAmpX: { value: 2.5 },
+                        uPathFreqY: { value: 0.15 },
+                        uPathAmpY: { value: 2.0 },
+                        uHexScale: { value: 1.5 },
+                        uCameraBlendStart: { value: 0.15 },
+                        uCameraBlendEnd: { value: 0.85 },
+                        uHexBorderRadius: { value: 0.5 },
+                        uWallThickness: { value: 0.04 },
+                        uRingThickness: { value: 0.05 },
+                        uDistanceScale: { value: 0.8 },
+                        uTrailSpeed: { value: 1.5 },
+                        uTrailEdgeStart: { value: 0.4 },
+                        uTrailEdgeEnd: { value: 1.0 },
+                        uColorShiftSpeed: { value: 0.5 },
+                        uColorDepthFrequency: { value: 0.4 },
+                        uColorXFrequency: { value: 0.2 },
+                        uColorSmoothness: { value: 0.3 },
+                        uColorCount: { value: 8 },
+                        uColors: {
+                            value: Array.from({ length: 10 }, () => new THREE.Vector4(0.0, 0.0, 0.0, 1.0))
+                        },
+                        uGlowIntensity: { value: 0.003 },
+                        uGlowEpsilon: { value: 0.001 },
+                        uGlowMix: { value: 0.06 },
+                        uFogDensity: { value: 0.015 },
+                        uBackgroundColor: { value: new THREE.Vector3(0.02, 0.0, 0.05) },
+                        uGamma: { value: 2.2 },
+                        uMarchSteps: { value: 80 },
+                        uMaxDist: { value: 50.0 },
+                        uSurfaceEpsilon: { value: 0.001 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                    });
                 } else {
                     baseFragment = meltFragShader;
                     Object.assign(uniforms, {
@@ -5859,6 +6121,51 @@
                             mat.uniforms.uSaturation.value = cur.digitalCave.saturation;
                             mat.uniforms.uFractalColor.value.set(...cur.digitalCave.fractalColor);
                             mat.uniforms.uGlowColor.value.set(...cur.digitalCave.glowColor);
+                        } else if (cur.activeShader === 'neonHoneycombs') {
+                            // Raw elapsed - flightSpeed/trailSpeed/colorShiftSpeed each multiply
+                            // uTime independently inside the shader, so Freeze/manual-time works.
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uFlightSpeed.value = cur.neonHoneycombs.flightSpeed;
+                            mat.uniforms.uLookAheadDistance.value = cur.neonHoneycombs.lookAheadDistance;
+                            mat.uniforms.uZSpacing.value = cur.neonHoneycombs.zSpacing;
+                            mat.uniforms.uPathFreqX.value = cur.neonHoneycombs.pathFreqX;
+                            mat.uniforms.uPathAmpX.value = cur.neonHoneycombs.pathAmpX;
+                            mat.uniforms.uPathFreqY.value = cur.neonHoneycombs.pathFreqY;
+                            mat.uniforms.uPathAmpY.value = cur.neonHoneycombs.pathAmpY;
+                            mat.uniforms.uHexScale.value = cur.neonHoneycombs.hexScale;
+                            mat.uniforms.uCameraBlendStart.value = cur.neonHoneycombs.cameraBlendStart;
+                            mat.uniforms.uCameraBlendEnd.value = cur.neonHoneycombs.cameraBlendEnd;
+                            mat.uniforms.uHexBorderRadius.value = cur.neonHoneycombs.hexBorderRadius;
+                            mat.uniforms.uWallThickness.value = cur.neonHoneycombs.wallThickness;
+                            mat.uniforms.uRingThickness.value = cur.neonHoneycombs.ringThickness;
+                            mat.uniforms.uDistanceScale.value = cur.neonHoneycombs.distanceScale;
+                            mat.uniforms.uTrailSpeed.value = cur.neonHoneycombs.trailSpeed;
+                            mat.uniforms.uTrailEdgeStart.value = cur.neonHoneycombs.trailEdgeStart;
+                            mat.uniforms.uTrailEdgeEnd.value = cur.neonHoneycombs.trailEdgeEnd;
+                            mat.uniforms.uColorShiftSpeed.value = cur.neonHoneycombs.colorShiftSpeed;
+                            mat.uniforms.uColorDepthFrequency.value = cur.neonHoneycombs.colorDepthFrequency;
+                            mat.uniforms.uColorXFrequency.value = cur.neonHoneycombs.colorXFrequency;
+                            mat.uniforms.uColorSmoothness.value = cur.neonHoneycombs.colorSmoothness;
+                            mat.uniforms.uColorCount.value = cur.neonHoneycombs.colorCount;
+                            mat.uniforms.uGlowIntensity.value = cur.neonHoneycombs.glowIntensity;
+                            mat.uniforms.uGlowEpsilon.value = cur.neonHoneycombs.glowEpsilon;
+                            mat.uniforms.uGlowMix.value = cur.neonHoneycombs.glowMix;
+                            mat.uniforms.uFogDensity.value = cur.neonHoneycombs.fogDensity;
+                            mat.uniforms.uGamma.value = cur.neonHoneycombs.gamma;
+                            mat.uniforms.uMarchSteps.value = Math.round(cur.neonHoneycombs.marchSteps);
+                            mat.uniforms.uMaxDist.value = cur.neonHoneycombs.maxDist;
+                            mat.uniforms.uSurfaceEpsilon.value = cur.neonHoneycombs.surfaceEpsilon;
+                            mat.uniforms.uHue.value = cur.neonHoneycombs.hue;
+                            mat.uniforms.uSaturation.value = cur.neonHoneycombs.saturation;
+                            const [bgr, bgg, bgb] = hexToRgbArray(cur.neonHoneycombs.backgroundColor);
+                            mat.uniforms.uBackgroundColor.value.set(bgr, bgg, bgb);
+                            for (let i = 0; i < 10; i++) {
+                                const hex = cur.neonHoneycombs.colors[i];
+                                if (hex) {
+                                    const [cr, cg, cb] = hexToRgbArray(hex);
+                                    mat.uniforms.uColors.value[i].set(cr, cg, cb, 1.0);
+                                }
+                            }
                         }
                     }
 
@@ -6289,6 +6596,45 @@
                     hue: 0,
                     saturation: 1.0,
                 },
+                neonHoneycombs: {
+                    flightSpeed: 0.6,
+                    lookAheadDistance: 1.5,
+                    zSpacing: 2.0,
+                    pathFreqX: 0.2,
+                    pathAmpX: 2.5,
+                    pathFreqY: 0.15,
+                    pathAmpY: 2.0,
+                    hexScale: 1.5,
+                    cameraBlendStart: 0.15,
+                    cameraBlendEnd: 0.85,
+                    hexBorderRadius: 0.5,
+                    wallThickness: 0.04,
+                    ringThickness: 0.05,
+                    distanceScale: 0.8,
+                    trailSpeed: 1.5,
+                    trailEdgeStart: 0.4,
+                    trailEdgeEnd: 1.0,
+                    colorShiftSpeed: 0.5,
+                    colorDepthFrequency: 0.4,
+                    colorXFrequency: 0.2,
+                    colorSmoothness: 0.3,
+                    colorCount: 8,
+                    colors: [
+                        "#FF4A2C", "#DA0889", "#800CE0", "#2553FF", "#00B5D3",
+                        "#25F776", "#7FF31F", "#DAAC00", "#000000", "#000000",
+                    ],
+                    glowIntensity: 0.003,
+                    glowEpsilon: 0.001,
+                    glowMix: 0.06,
+                    fogDensity: 0.015,
+                    backgroundColor: "#05000D",
+                    gamma: 2.2,
+                    marchSteps: 80,
+                    maxDist: 50.0,
+                    surfaceEpsilon: 0.001,
+                    hue: 0,
+                    saturation: 1.0,
+                },
                 blurStrength: 0.0,
                 isFrozen: false,
                 manualTime: 0,
@@ -6532,7 +6878,7 @@
                         <div className="space-y-3 pt-4 border-t border-white/10">
                             <StaticSelect
                                 label={t('activeShader')}
-                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi', 'chromaticLight', 'halo', 'chromaticUniverse', 'membranes', 'neonKaleidoscope', 'glowCruise', 'digitalCave'].map(v => ({
+                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi', 'chromaticLight', 'halo', 'chromaticUniverse', 'membranes', 'neonKaleidoscope', 'glowCruise', 'digitalCave', 'neonHoneycombs'].map(v => ({
                                     value: v,
                                     label: v === 'luminousResin' ? t('luminousResin') : t(v),
                                 }))}
@@ -8002,6 +8348,121 @@
                                             color={rgbArrayToHex(settings.digitalCave.glowColor)}
                                             onChange={h => updateNested('digitalCave', 'glowColor', hexToRgbArray(h))}
                                         />
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* NEON HONEYCOMBS SHADER */}
+                        {settings.activeShader === 'neonHoneycombs' && (
+                            <>
+                                <ShaderSlider label={t('flightSpeed')} value={settings.neonHoneycombs.flightSpeed} min={-4} max={4} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'flightSpeed', v)} dir={dir} />
+                                <ShaderSlider label={t('lookAheadDistance')} value={settings.neonHoneycombs.lookAheadDistance} min={0.1} max={10} step={0.1}
+                                    update={v => updateNested('neonHoneycombs', 'lookAheadDistance', v)} dir={dir} />
+                                <ShaderSlider label={t('zSpacing')} value={settings.neonHoneycombs.zSpacing} min={0.5} max={8} step={0.1}
+                                    update={v => updateNested('neonHoneycombs', 'zSpacing', v)} dir={dir} />
+                                <ShaderSlider label={t('pathFreqX')} value={settings.neonHoneycombs.pathFreqX} min={0} max={1} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'pathFreqX', v)} dir={dir} />
+                                <ShaderSlider label={t('pathAmpX')} value={settings.neonHoneycombs.pathAmpX} min={0} max={10} step={0.1}
+                                    update={v => updateNested('neonHoneycombs', 'pathAmpX', v)} dir={dir} />
+                                <ShaderSlider label={t('pathFreqY')} value={settings.neonHoneycombs.pathFreqY} min={0} max={1} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'pathFreqY', v)} dir={dir} />
+                                <ShaderSlider label={t('pathAmpY')} value={settings.neonHoneycombs.pathAmpY} min={0} max={10} step={0.1}
+                                    update={v => updateNested('neonHoneycombs', 'pathAmpY', v)} dir={dir} />
+                                <ShaderSlider label={t('hexScale')} value={settings.neonHoneycombs.hexScale} min={0.2} max={5} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'hexScale', v)} dir={dir} />
+                                <ShaderSlider label={t('cameraBlendStart')} value={settings.neonHoneycombs.cameraBlendStart} min={0} max={1} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'cameraBlendStart', v)} dir={dir} />
+                                <ShaderSlider label={t('cameraBlendEnd')} value={settings.neonHoneycombs.cameraBlendEnd} min={0} max={1} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'cameraBlendEnd', v)} dir={dir} />
+                                <ShaderSlider label={t('hexBorderRadius')} value={settings.neonHoneycombs.hexBorderRadius} min={0.1} max={1} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'hexBorderRadius', v)} dir={dir} />
+                                <ShaderSlider label={t('wallThickness')} value={settings.neonHoneycombs.wallThickness} min={0.001} max={0.3} step={0.001}
+                                    update={v => updateNested('neonHoneycombs', 'wallThickness', v)} dir={dir} />
+                                <ShaderSlider label={t('ringThickness')} value={settings.neonHoneycombs.ringThickness} min={0.001} max={0.3} step={0.001}
+                                    update={v => updateNested('neonHoneycombs', 'ringThickness', v)} dir={dir} />
+                                <ShaderSlider label={t('distanceScale')} value={settings.neonHoneycombs.distanceScale} min={0.1} max={2} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'distanceScale', v)} dir={dir} />
+                                <ShaderSlider label={t('trailSpeed')} value={settings.neonHoneycombs.trailSpeed} min={-5} max={5} step={0.05}
+                                    update={v => updateNested('neonHoneycombs', 'trailSpeed', v)} dir={dir} />
+                                <ShaderSlider label={t('trailEdgeStart')} value={settings.neonHoneycombs.trailEdgeStart} min={0} max={1} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'trailEdgeStart', v)} dir={dir} />
+                                <ShaderSlider label={t('trailEdgeEnd')} value={settings.neonHoneycombs.trailEdgeEnd} min={0} max={1} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'trailEdgeEnd', v)} dir={dir} />
+                                <ShaderSlider label={t('colorShiftSpeed')} value={settings.neonHoneycombs.colorShiftSpeed} min={-5} max={5} step={0.05}
+                                    update={v => updateNested('neonHoneycombs', 'colorShiftSpeed', v)} dir={dir} />
+                                <ShaderSlider label={t('colorDepthFrequency')} value={settings.neonHoneycombs.colorDepthFrequency} min={0} max={2} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'colorDepthFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('colorXFrequency')} value={settings.neonHoneycombs.colorXFrequency} min={0} max={2} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'colorXFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('colorSmoothness')} value={settings.neonHoneycombs.colorSmoothness} min={0.01} max={2} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'colorSmoothness', v)} dir={dir} />
+                                <ShaderSlider label={t('glowIntensity')} value={settings.neonHoneycombs.glowIntensity} min={0} max={0.02} step={0.0001}
+                                    update={v => updateNested('neonHoneycombs', 'glowIntensity', v)} dir={dir} />
+                                <ShaderSlider label={t('glowEpsilon')} value={settings.neonHoneycombs.glowEpsilon} min={0.0001} max={0.02} step={0.0001}
+                                    update={v => updateNested('neonHoneycombs', 'glowEpsilon', v)} dir={dir} />
+                                <ShaderSlider label={t('glowMix')} value={settings.neonHoneycombs.glowMix} min={0} max={0.3} step={0.001}
+                                    update={v => updateNested('neonHoneycombs', 'glowMix', v)} dir={dir} />
+                                <ShaderSlider label={t('fogDensity')} value={settings.neonHoneycombs.fogDensity} min={0} max={0.1} step={0.001}
+                                    update={v => updateNested('neonHoneycombs', 'fogDensity', v)} dir={dir} />
+                                <ShaderSlider label={t('gamma')} value={settings.neonHoneycombs.gamma} min={0.5} max={4} step={0.01}
+                                    update={v => updateNested('neonHoneycombs', 'gamma', v)} dir={dir} />
+                                <ShaderSlider label={t('marchSteps')} value={settings.neonHoneycombs.marchSteps} min={10} max={150} step={1}
+                                    update={v => updateNested('neonHoneycombs', 'marchSteps', v)} dir={dir} />
+                                <ShaderSlider label={t('maxDist')} value={settings.neonHoneycombs.maxDist} min={5} max={150} step={0.5}
+                                    update={v => updateNested('neonHoneycombs', 'maxDist', v)} dir={dir} />
+                                <ShaderSlider label={t('surfaceEpsilon')} value={settings.neonHoneycombs.surfaceEpsilon} min={0.0001} max={0.02} step={0.0001}
+                                    update={v => updateNested('neonHoneycombs', 'surfaceEpsilon', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.neonHoneycombs.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('neonHoneycombs', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.neonHoneycombs.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('neonHoneycombs', 'saturation', v)} dir={dir} />
+
+                                <div className="space-y-2 mt-4">
+                                    <span className="text-xs uppercase text-gray-500">{t('colorBack')}</span>
+                                    <ColorPicker
+                                        color={settings.neonHoneycombs.backgroundColor}
+                                        onChange={h => updateNested('neonHoneycombs', 'backgroundColor', h)}
+                                    />
+                                </div>
+
+                                {/* COLOR COUNT SLIDER (Adjusts number of colors from 2 to 10) */}
+                                <ShaderSlider
+                                    label={t('colorCount')}
+                                    value={settings.neonHoneycombs.colorCount}
+                                    min={2}
+                                    max={10}
+                                    step={1}
+                                    update={v => updateNested('neonHoneycombs', 'colorCount', v)}
+                                    dir={dir}
+                                />
+
+                                <div className="mt-4 space-y-4">
+                                    <span className="text-xs uppercase text-gray-500 block">
+                                        {t('swirlColors')}
+                                    </span>
+                                    <div className="flex flex-col space-y-3">
+                                        {[
+                                            'firstColor', 'secondColor', 'thirdColor', 'fourthColor', 'fifthColor',
+                                            'sixthColor', 'seventhColor', 'eighthColor', 'ninthColor', 'tenthColor',
+                                        ].map((translationKey, i) => {
+                                            if (i >= settings.neonHoneycombs.colorCount) return null;
+
+                                            return (
+                                                <div key={translationKey} className="w-full space-y-1 p-2 bg-white/5 rounded">
+                                                    <span className="text-[10px] uppercase text-gray-400 block">{t(translationKey)}</span>
+                                                    <ColorPicker
+                                                        color={settings.neonHoneycombs.colors[i]}
+                                                        onChange={h => {
+                                                            const newColors = [...settings.neonHoneycombs.colors];
+                                                            newColors[i] = h;
+                                                            updateNested('neonHoneycombs', 'colors', newColors);
+                                                        }}
+                                                    />
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             </>
