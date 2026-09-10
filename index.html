@@ -2784,8 +2784,6 @@
         uniform float uPathFreqY;
         uniform float uPathAmpY;
         uniform float uHexScale;
-        uniform float uCameraBlendStart;
-        uniform float uCameraBlendEnd;
 
         uniform float uHexBorderRadius;
         uniform float uWallThickness;
@@ -2793,8 +2791,6 @@
         uniform float uDistanceScale;
 
         uniform float uTrailSpeed;
-        uniform float uTrailEdgeStart;
-        uniform float uTrailEdgeEnd;
 
         uniform float uColorShiftSpeed;
         uniform float uColorDepthFrequency;
@@ -2853,7 +2849,7 @@
             vec2 centerA = HexCoords(targetA * uHexScale).zw / uHexScale;
             vec2 centerB = HexCoords(targetB * uHexScale).zw / uHexScale;
 
-            float blend = smoothstep(uCameraBlendStart, uCameraBlendEnd, fraction);
+            float blend = smoothstep(0.15, 0.85, fraction);
 
             return mix(centerA, centerB, blend);
         }
@@ -2893,7 +2889,7 @@
             float offset = hash31(cellID);
 
             float draw = fract(normAngle - uTime * uTrailSpeed + offset);
-            float trail = smoothstep(uTrailEdgeStart, uTrailEdgeEnd, draw);
+            float trail = smoothstep(0.4, 1.0, draw);
 
             float colorPhase = cellID.z * uColorDepthFrequency + cellID.x * uColorXFrequency + uTime * uColorShiftSpeed;
             vec3 baseCol = nhPalette(colorPhase);
@@ -2933,6 +2929,292 @@
             col = mix(col, uBackgroundColor, 1.0 - exp(-uFogDensity * d0 * d0));
             col = col / (1.0 + col);
             col = pow(max(col, vec3(0.0)), vec3(1.0 / max(uGamma, 0.001)));
+
+            vec3 hsv = rgb2hsv(clamp(col, 0.0, 1.0));
+            hsv.x = fract(hsv.x + uHue / 360.0);
+            hsv.y = clamp(hsv.y * uSaturation, 0.0, 1.0);
+            col = hsv2rgb(hsv);
+
+            gl_FragColor = vec4(col, 1.0);
+        }
+        `;
+
+        const collagenCaveFragShader = `precision highp float;
+
+        uniform vec2 uResolution;
+        uniform float uTime;
+
+        uniform float uFlightSpeed;
+        uniform float uCameraOffsetX;
+        uniform float uPathFreqA;
+        uniform float uPathFreqB;
+        uniform float uPathCoefA;
+        uniform float uPathCoefB;
+        uniform float uPathCoefC;
+        uniform float uPathCoefD;
+        uniform float uFovDepth;
+
+        uniform float uVoronoiScale;
+        uniform float uVoronoiTimeSpeed;
+        uniform float uCellWobbleAmp;
+        uniform float uVoronoiColorScale;
+
+        uniform float uGyroid1Frequency;
+        uniform float uGyroid1Thickness;
+        uniform float uGyroid1ColorInfluence;
+        uniform float uGyroid2Frequency;
+        uniform float uGyroid2Thickness;
+        uniform float uBlendSmoothness;
+
+        uniform float uMarchSteps;
+        uniform float uSurfaceEpsilon;
+        uniform float uMaxDist;
+        uniform float uNormalEpsilon;
+
+        uniform float uNoiseScaleX;
+        uniform float uNoiseScaleY;
+        uniform float uNoiseScaleZ;
+        uniform float uNoiseGlobalScale;
+        uniform float uNoiseOffsetX;
+        uniform float uNoiseOctaves;
+        uniform float uNoiseGain;
+
+        uniform float uLightDirX;
+        uniform float uLightDirY;
+        uniform float uLightDirZ;
+        uniform float uNormalNoiseAmp;
+        uniform float uSpecPower;
+        uniform float uSpecIntensity;
+        uniform vec3 uSpecColor;
+        uniform float uBackLightStrength;
+        uniform vec3 uBackLightColor;
+        uniform float uRimPower;
+        uniform float uRimIntensity;
+        uniform vec3 uRimColor;
+
+        uniform float uSurfaceGyroidFrequency;
+        uniform float uSurfaceGyroidThickness;
+        uniform float uCrackColorInfluence;
+        uniform float uCrackWidthBase;
+        uniform float uCrackWidthRange;
+        uniform float uCrackNormalThreshold;
+        uniform float uCrackFalloffFar;
+        uniform float uCrackGyroid2Frequency;
+        uniform float uCrackGyroid2Thickness;
+        uniform float uCrackGyroid2TimeSpeed;
+        uniform float uCrackGyroid2Multiplier;
+        uniform float uCrackNormalBlend;
+        uniform vec3 uCrackColor;
+        uniform float uCrackIntensity;
+
+        uniform float uFogDensity;
+        uniform vec3 uBackgroundColor;
+        uniform float uExposureMultiplier;
+        uniform float uGammaBoost;
+        uniform float uGamma;
+
+        uniform float uHue;
+        uniform float uSaturation;
+
+        ${hueSatHelpers}
+
+        vec3 ccNoisePos;
+
+        vec2 ccH(vec2 n) {
+            return fract(1e4 * sin(n.x + n.y / 0.7 + vec2(1.0, 12.34)));
+        }
+
+        vec3 ccVoronoiDistSq(vec2 p, float dt) {
+            vec2 cellId, diff;
+            float d;
+            vec3 dists = vec3(9.0);
+
+            for (int k = 0; k < 9; ++k) {
+                cellId = ceil(p) + vec2(float(k - (k / 3) * 3), float(k / 3)) - 2.0;
+                diff = ccH(cellId) + cellId + uCellWobbleAmp * cos(dt + 6.28 * ccH(cellId)) - p;
+
+                d = dot(diff, diff);
+
+                if (d < dists.x) {
+                    dists.yz = dists.xy;
+                    dists.x = d;
+                } else if (d < dists.y) {
+                    dists.z = dists.y;
+                    dists.y = d;
+                } else if (d < dists.z) {
+                    dists.z = d;
+                }
+            }
+            return dists;
+        }
+
+        float ccHash(vec3 p) {
+            vec3 p3 = fract(p * 0.1031);
+            p3 += dot(p3, p3.zyx + 31.32);
+            return fract((p3.x + p3.y) * p3.z) * 2.0 - 1.0;
+        }
+
+        float ccSmin(float d1, float d2, float k) {
+            k *= 4.0;
+            float h = max(k - abs(d1 - d2), 0.0);
+            return min(d1, d2) - h * h * 0.25 / k;
+        }
+
+        vec4 ccNoised(in vec3 x) {
+            vec3 i = floor(x);
+            vec3 w = fract(x);
+            vec3 u = w * w * (3.0 - 2.0 * w);
+            vec3 du = 6.0 * w * (1.0 - w);
+            float a = ccHash(i + vec3(0.0, 0.0, 0.0));
+            float b = ccHash(i + vec3(1.0, 0.0, 0.0));
+            float c = ccHash(i + vec3(0.0, 1.0, 0.0));
+            float d = ccHash(i + vec3(1.0, 1.0, 0.0));
+            float e = ccHash(i + vec3(0.0, 0.0, 1.0));
+            float f = ccHash(i + vec3(1.0, 0.0, 1.0));
+            float g = ccHash(i + vec3(0.0, 1.0, 1.0));
+            float h = ccHash(i + vec3(1.0, 1.0, 1.0));
+            float k0 = a;
+            float k1 = b - a;
+            float k2 = c - a;
+            float k3 = e - a;
+            float k4 = a - b - c + d;
+            float k5 = a - c - e + g;
+            float k6 = a - b - e + f;
+            float k7 = -a + b + c - d + e - f - g + h;
+            return vec4(
+                k0 + k1 * u.x + k2 * u.y + k3 * u.z + k4 * u.x * u.y + k5 * u.y * u.z + k6 * u.z * u.x + k7 * u.x * u.y * u.z,
+                du * vec3(
+                    k1 + k4 * u.y + k6 * u.z + k7 * u.y * u.z,
+                    k2 + k5 * u.z + k4 * u.x + k7 * u.z * u.x,
+                    k3 + k6 * u.x + k5 * u.y + k7 * u.x * u.y
+                )
+            );
+        }
+
+        vec4 ccNoisedFBM(in vec3 x) {
+            vec4 result = vec4(0.0);
+            float a = 1.0;
+            float s = 0.0;
+            for (int i = 0; i < 10; i++) {
+                if (float(i) >= uNoiseOctaves) break;
+                result += ccNoised(x * 0.035) * a;
+                s += a;
+                x *= 2.0;
+                a *= uNoiseGain;
+            }
+            return result / max(s, 0.0001);
+        }
+
+        vec2 ccCamPath(float t) {
+            float s = sin(t * uPathFreqA);
+            float c = cos(t * uPathFreqB);
+            return vec2(c * uPathCoefA - s * uPathCoefB, c * uPathCoefC + s * uPathCoefD);
+        }
+
+        float ccSdGyroid(vec3 p, float offset, float thickness) {
+            return abs(dot(sin(p * offset), cos(p.yzx * offset)) - thickness);
+        }
+
+        vec2 ccMap(vec3 p) {
+            vec3 d1 = ccVoronoiDistSq(p.xy * uVoronoiScale, uTime * uVoronoiTimeSpeed);
+
+            vec3 col1 = uVoronoiColorScale * sqrt(d1);
+            col1 -= vec3(col1.x);
+            col1 += 7.0 * (col1.y / (col1.y / col1.z + 1.0) - 0.5) - col1;
+
+            p.xy -= ccCamPath(p.z);
+            vec2 d2 = vec2(ccSdGyroid(p, uGyroid1Frequency, uGyroid1Thickness) + (col1.x * uGyroid1ColorInfluence), 0.0);
+
+            vec2 d4 = vec2(ccSdGyroid(p, uGyroid2Frequency, uGyroid2Thickness), 2.0);
+
+            vec2 minDist = vec2(ccSmin(d2.x, d4.x, uBlendSmoothness), 1.0);
+            return minDist;
+        }
+
+        vec2 ccRayMarch(vec3 ro, vec3 rd) {
+            float dt = 0.0;
+            float id = 0.0;
+            for (int i = 0; i < 200; i++) {
+                if (float(i) >= uMarchSteps) break;
+                vec3 p = ro + rd * dt;
+                vec2 d = ccMap(p);
+                ccNoisePos = p;
+                id = d.y;
+                dt += d.x;
+                if (abs(d.x) < uSurfaceEpsilon || dt > uMaxDist) break;
+            }
+            return vec2(dt, id);
+        }
+
+        vec3 ccCalcNormal(vec3 p) {
+            float e = uNormalEpsilon;
+            return normalize(vec3(
+                ccMap(p + vec3(e, 0.0, 0.0)).x - ccMap(p - vec3(e, 0.0, 0.0)).x,
+                ccMap(p + vec3(0.0, e, 0.0)).x - ccMap(p - vec3(0.0, e, 0.0)).x,
+                ccMap(p + vec3(0.0, 0.0, e)).x - ccMap(p - vec3(0.0, 0.0, e)).x
+            ));
+        }
+
+        vec3 ccRender(vec3 ro, vec3 rd) {
+            vec3 col = vec3(0.0);
+
+            vec2 dt = ccRayMarch(ro, rd);
+
+            vec4 noise = ccNoisedFBM(ccNoisePos * vec3(uNoiseScaleX, uNoiseScaleY, uNoiseScaleZ) * uNoiseGlobalScale + vec3(uNoiseOffsetX, 0.0, 0.0));
+
+            if (dt.y < uMaxDist) {
+                vec3 p = ro + rd * dt.x;
+                vec3 norm = ccCalcNormal(p);
+                vec3 l = normalize(vec3(uLightDirX, uLightDirY, uLightDirZ));
+
+                vec3 norm2 = normalize(norm + noise.yzw * uNormalNoiseAmp);
+
+                float NoV = clamp(dot(norm2, -rd), 0.0, 1.0);
+                float rim = pow(1.0 - NoV, uRimPower);
+
+                vec3 view = normalize(ro - p);
+                vec3 halfVec = normalize(l + view);
+                float spec = pow(max(0.0, dot(norm2, halfVec)), uSpecPower);
+
+                col += uSpecColor * spec * uSpecIntensity;
+
+                float backLight = max(0.0, dot(norm2, -l)) * uBackLightStrength;
+                col += uBackLightColor * backLight;
+                col += uRimColor * rim * uRimIntensity;
+
+                vec3 d1b = ccVoronoiDistSq(p.xy * uVoronoiScale, uTime * uVoronoiTimeSpeed);
+
+                vec3 col1 = uVoronoiColorScale * sqrt(d1b);
+                col1 -= vec3(col1.x);
+                col1 += 7.0 * (col1.y / (col1.y / col1.z + 1.0) - 0.5) - col1;
+
+                float surfaceGyroid = ccSdGyroid(p, uSurfaceGyroidFrequency, uSurfaceGyroidThickness) + (col1.x * uCrackColorInfluence);
+
+                float crackWidth = uCrackWidthBase + smoothstep(0.0, uCrackNormalThreshold, norm2.y) * uCrackWidthRange;
+                float cracks = smoothstep(crackWidth, uCrackFalloffFar, surfaceGyroid);
+
+                float gyroid3 = ccSdGyroid(p + (uTime * uCrackGyroid2TimeSpeed), uCrackGyroid2Frequency, uCrackGyroid2Thickness);
+                cracks *= gyroid3 * uCrackGyroid2Multiplier + uCrackNormalBlend * smoothstep(0.2, 0.0, norm2.y);
+
+                col += cracks * uCrackColor * uCrackIntensity;
+
+                col = mix(col, uBackgroundColor, 1.0 - exp(-uFogDensity * dt.x * dt.x * dt.x));
+            }
+            col *= uExposureMultiplier;
+
+            col = pow(max(col, vec3(0.0)), vec3(uGammaBoost / max(uGamma, 0.001)));
+
+            return col;
+        }
+
+        void main() {
+            vec3 ro = vec3(uCameraOffsetX, 0.0, -uTime * uFlightSpeed);
+            ro.xy += ccCamPath(ro.z);
+
+            vec2 uv = (2.0 * gl_FragCoord.xy - uResolution.xy) / uResolution.y;
+
+            vec3 rd = normalize(vec3(uv, uFovDepth));
+            vec3 col = ccRender(ro, rd);
 
             vec3 hsv = rgb2hsv(clamp(col, 0.0, 1.0));
             hsv.x = fract(hsv.x + uHue / 360.0);
@@ -3089,9 +3371,30 @@
                 fieldBase: "Field Base", fieldStrength: "Field Strength", emissionGain: "Emission Gain",
                 neonHoneycombs: "Neon Honeycombs",
                 flightSpeed: "Flight Speed", hexScale: "Hex Scale",
-                cameraBlendStart: "Camera Blend Start", cameraBlendEnd: "Camera Blend End",
+                zSpacing: "Z Spacing",
+                collagenCave: "Collagen Cave",
+                cameraOffsetX: "Camera Offset X", pathFreqA: "Path Frequency A", pathFreqB: "Path Frequency B",
+                pathCoefA: "Path Coefficient A", pathCoefB: "Path Coefficient B", pathCoefC: "Path Coefficient C", pathCoefD: "Path Coefficient D",
+                fovDepth: "FOV Depth",
+                voronoiTimeSpeed: "Voronoi Time Speed", cellWobbleAmp: "Cell Wobble Amount", voronoiColorScale: "Voronoi Color Scale",
+                gyroid1Frequency: "Gyroid 1 Frequency", gyroid1Thickness: "Gyroid 1 Thickness", gyroid1ColorInfluence: "Gyroid 1 Color Influence",
+                gyroid2Frequency: "Gyroid 2 Frequency", gyroid2Thickness: "Gyroid 2 Thickness", blendSmoothness: "Blend Smoothness",
+                normalEpsilon: "Normal Epsilon",
+                noiseScaleX: "Noise Scale X", noiseScaleY: "Noise Scale Y", noiseScaleZ: "Noise Scale Z",
+                noiseGlobalScale: "Noise Global Scale", noiseOffsetX: "Noise Offset X", noiseOctaves: "Noise Octaves", noiseGain: "Noise Gain",
+                lightDirX: "Light Direction X", lightDirY: "Light Direction Y", lightDirZ: "Light Direction Z",
+                normalNoiseAmp: "Normal Noise Amount", specPower: "Specular Power", specIntensity: "Specular Intensity", specColor: "Specular Color",
+                backLightStrength: "Backlight Strength", backLightColor: "Backlight Color",
+                rimPower: "Rim Power", rimIntensity: "Rim Intensity", rimColor: "Rim Color",
+                surfaceGyroidFrequency: "Surface Gyroid Frequency", surfaceGyroidThickness: "Surface Gyroid Thickness",
+                crackColorInfluence: "Crack Color Influence",
+                crackWidthBase: "Crack Width Base", crackWidthRange: "Crack Width Range",
+                crackNormalThreshold: "Crack Normal Threshold", crackFalloffFar: "Crack Falloff Far",
+                crackGyroid2Frequency: "Crack Gyroid Frequency", crackGyroid2Thickness: "Crack Gyroid Thickness",
+                crackGyroid2TimeSpeed: "Crack Gyroid Time Speed", crackGyroid2Multiplier: "Crack Gyroid Multiplier",
+                crackNormalBlend: "Crack Normal Blend", crackColor: "Crack Color", crackIntensity: "Crack Intensity",
+                exposureMultiplier: "Exposure Multiplier", gammaBoost: "Gamma Boost",
                 hexBorderRadius: "Hex Border Radius", wallThickness: "Wall Thickness", ringThickness: "Ring Thickness",
-                trailEdgeStart: "Trail Edge Start", trailEdgeEnd: "Trail Edge End",
                 colorDepthFrequency: "Color Depth Frequency", colorXFrequency: "Color X Frequency",
                 colorSmoothness: "Color Smoothness", glowEpsilon: "Glow Epsilon", glowMix: "Glow Mix", fogDensity: "Fog Density",
             },
@@ -3234,9 +3537,30 @@
                 fieldBase: "בסיס שדה", fieldStrength: "עוצמת שדה", emissionGain: "הגברת פליטה",
                 neonHoneycombs: "כוורות ניאון",
                 flightSpeed: "מהירות טיסה", hexScale: "קנה מידת משושה",
-                cameraBlendStart: "התחלת מיזוג מצלמה", cameraBlendEnd: "סיום מיזוג מצלמה",
+                zSpacing: "מרווח Z",
+                collagenCave: "מערת קולגן",
+                cameraOffsetX: "היסט מצלמה X", pathFreqA: "תדירות מסלול A", pathFreqB: "תדירות מסלול B",
+                pathCoefA: "מקדם מסלול A", pathCoefB: "מקדם מסלול B", pathCoefC: "מקדם מסלול C", pathCoefD: "מקדם מסלול D",
+                fovDepth: "עומק שדה ראייה",
+                voronoiTimeSpeed: "מהירות זמן וורונוי", cellWobbleAmp: "כמות תנודת תא", voronoiColorScale: "קנה מידת צבע וורונוי",
+                gyroid1Frequency: "תדירות גיירואיד 1", gyroid1Thickness: "עובי גיירואיד 1", gyroid1ColorInfluence: "השפעת צבע גיירואיד 1",
+                gyroid2Frequency: "תדירות גיירואיד 2", gyroid2Thickness: "עובי גיירואיד 2", blendSmoothness: "חלקות מיזוג",
+                normalEpsilon: "אפסילון נורמל",
+                noiseScaleX: "קנה מידת רעש X", noiseScaleY: "קנה מידת רעש Y", noiseScaleZ: "קנה מידת רעש Z",
+                noiseGlobalScale: "קנה מידת רעש כללי", noiseOffsetX: "היסט רעש X", noiseOctaves: "אוקטבות רעש", noiseGain: "הגברת רעש",
+                lightDirX: "כיוון אור X", lightDirY: "כיוון אור Y", lightDirZ: "כיוון אור Z",
+                normalNoiseAmp: "כמות רעש נורמל", specPower: "עוצמת ברק", specIntensity: "עוצמת ברק ספקולרי", specColor: "צבע ברק",
+                backLightStrength: "עוצמת תאורה אחורית", backLightColor: "צבע תאורה אחורית",
+                rimPower: "עוצמת קצה", rimIntensity: "עוצמת זוהר קצה", rimColor: "צבע קצה",
+                surfaceGyroidFrequency: "תדירות גיירואיד משטח", surfaceGyroidThickness: "עובי גיירואיד משטח",
+                crackColorInfluence: "השפעת צבע סדק",
+                crackWidthBase: "בסיס רוחב סדק", crackWidthRange: "טווח רוחב סדק",
+                crackNormalThreshold: "סף נורמל סדק", crackFalloffFar: "דעיכת סדק רחוקה",
+                crackGyroid2Frequency: "תדירות גיירואיד סדק", crackGyroid2Thickness: "עובי גיירואיד סדק",
+                crackGyroid2TimeSpeed: "מהירות זמן גיירואיד סדק", crackGyroid2Multiplier: "מכפיל גיירואיד סדק",
+                crackNormalBlend: "מיזוג נורמל סדק", crackColor: "צבע סדק", crackIntensity: "עוצמת סדק",
+                exposureMultiplier: "מכפיל חשיפה", gammaBoost: "הגברת גמא",
                 hexBorderRadius: "רדיוס גבול משושה", wallThickness: "עובי קיר", ringThickness: "עובי טבעת",
-                trailEdgeStart: "התחלת קצה שביל", trailEdgeEnd: "סיום קצה שביל",
                 colorDepthFrequency: "תדירות צבע לפי עומק", colorXFrequency: "תדירות צבע X",
                 colorSmoothness: "חלקות צבע", glowEpsilon: "אפסילון זוהר", glowMix: "מיזוג זוהר", fogDensity: "צפיפות ערפל",
             },
@@ -3379,9 +3703,30 @@
                 fieldBase: "Base Campo", fieldStrength: "Intensità Campo", emissionGain: "Guadagno Emissione",
                 neonHoneycombs: "Nido d'Ape al Neon",
                 flightSpeed: "Velocità di Volo", hexScale: "Scala Esagono",
-                cameraBlendStart: "Inizio Fusione Camera", cameraBlendEnd: "Fine Fusione Camera",
+                zSpacing: "Spaziatura Z",
+                collagenCave: "Grotta di Collagene",
+                cameraOffsetX: "Offset Camera X", pathFreqA: "Frequenza Percorso A", pathFreqB: "Frequenza Percorso B",
+                pathCoefA: "Coefficiente Percorso A", pathCoefB: "Coefficiente Percorso B", pathCoefC: "Coefficiente Percorso C", pathCoefD: "Coefficiente Percorso D",
+                fovDepth: "Profondità FOV",
+                voronoiTimeSpeed: "Velocità Tempo Voronoi", cellWobbleAmp: "Oscillazione Cella", voronoiColorScale: "Scala Colore Voronoi",
+                gyroid1Frequency: "Frequenza Giroide 1", gyroid1Thickness: "Spessore Giroide 1", gyroid1ColorInfluence: "Influenza Colore Giroide 1",
+                gyroid2Frequency: "Frequenza Giroide 2", gyroid2Thickness: "Spessore Giroide 2", blendSmoothness: "Levigatura Fusione",
+                normalEpsilon: "Epsilon Normale",
+                noiseScaleX: "Scala Rumore X", noiseScaleY: "Scala Rumore Y", noiseScaleZ: "Scala Rumore Z",
+                noiseGlobalScale: "Scala Rumore Globale", noiseOffsetX: "Offset Rumore X", noiseOctaves: "Ottave Rumore", noiseGain: "Guadagno Rumore",
+                lightDirX: "Direzione Luce X", lightDirY: "Direzione Luce Y", lightDirZ: "Direzione Luce Z",
+                normalNoiseAmp: "Quantità Rumore Normale", specPower: "Potenza Speculare", specIntensity: "Intensità Speculare", specColor: "Colore Speculare",
+                backLightStrength: "Intensità Controluce", backLightColor: "Colore Controluce",
+                rimPower: "Potenza Bordo", rimIntensity: "Intensità Bordo", rimColor: "Colore Bordo",
+                surfaceGyroidFrequency: "Frequenza Giroide Superficie", surfaceGyroidThickness: "Spessore Giroide Superficie",
+                crackColorInfluence: "Influenza Colore Crepa",
+                crackWidthBase: "Base Larghezza Crepa", crackWidthRange: "Intervallo Larghezza Crepa",
+                crackNormalThreshold: "Soglia Normale Crepa", crackFalloffFar: "Dissolvenza Lontana Crepa",
+                crackGyroid2Frequency: "Frequenza Giroide Crepa", crackGyroid2Thickness: "Spessore Giroide Crepa",
+                crackGyroid2TimeSpeed: "Velocità Tempo Giroide Crepa", crackGyroid2Multiplier: "Moltiplicatore Giroide Crepa",
+                crackNormalBlend: "Fusione Normale Crepa", crackColor: "Colore Crepa", crackIntensity: "Intensità Crepa",
+                exposureMultiplier: "Moltiplicatore Esposizione", gammaBoost: "Potenziamento Gamma",
                 hexBorderRadius: "Raggio Bordo Esagono", wallThickness: "Spessore Parete", ringThickness: "Spessore Anello",
-                trailEdgeStart: "Inizio Bordo Scia", trailEdgeEnd: "Fine Bordo Scia",
                 colorDepthFrequency: "Frequenza Colore Profondità", colorXFrequency: "Frequenza Colore X",
                 colorSmoothness: "Morbidezza Colore", glowEpsilon: "Epsilon Bagliore", glowMix: "Mix Bagliore", fogDensity: "Densità Nebbia",
             },
@@ -3524,9 +3869,30 @@
                 fieldBase: "Base de Campo", fieldStrength: "Intensidad de Campo", emissionGain: "Ganancia de Emisión",
                 neonHoneycombs: "Panales de Neón",
                 flightSpeed: "Velocidad de Vuelo", hexScale: "Escala Hexagonal",
-                cameraBlendStart: "Inicio de Mezcla de Cámara", cameraBlendEnd: "Fin de Mezcla de Cámara",
+                zSpacing: "Espaciado Z",
+                collagenCave: "Cueva de Colágeno",
+                cameraOffsetX: "Desplazamiento de Cámara X", pathFreqA: "Frecuencia de Trayectoria A", pathFreqB: "Frecuencia de Trayectoria B",
+                pathCoefA: "Coeficiente de Trayectoria A", pathCoefB: "Coeficiente de Trayectoria B", pathCoefC: "Coeficiente de Trayectoria C", pathCoefD: "Coeficiente de Trayectoria D",
+                fovDepth: "Profundidad de FOV",
+                voronoiTimeSpeed: "Velocidad de Tiempo de Voronoi", cellWobbleAmp: "Oscilación de Celda", voronoiColorScale: "Escala de Color de Voronoi",
+                gyroid1Frequency: "Frecuencia de Giroide 1", gyroid1Thickness: "Grosor de Giroide 1", gyroid1ColorInfluence: "Influencia de Color de Giroide 1",
+                gyroid2Frequency: "Frecuencia de Giroide 2", gyroid2Thickness: "Grosor de Giroide 2", blendSmoothness: "Suavidad de Mezcla",
+                normalEpsilon: "Épsilon Normal",
+                noiseScaleX: "Escala de Ruido X", noiseScaleY: "Escala de Ruido Y", noiseScaleZ: "Escala de Ruido Z",
+                noiseGlobalScale: "Escala de Ruido Global", noiseOffsetX: "Desplazamiento de Ruido X", noiseOctaves: "Octavas de Ruido", noiseGain: "Ganancia de Ruido",
+                lightDirX: "Dirección de Luz X", lightDirY: "Dirección de Luz Y", lightDirZ: "Dirección de Luz Z",
+                normalNoiseAmp: "Cantidad de Ruido Normal", specPower: "Potencia Especular", specIntensity: "Intensidad Especular", specColor: "Color Especular",
+                backLightStrength: "Intensidad de Luz Trasera", backLightColor: "Color de Luz Trasera",
+                rimPower: "Potencia de Borde", rimIntensity: "Intensidad de Borde", rimColor: "Color de Borde",
+                surfaceGyroidFrequency: "Frecuencia de Giroide de Superficie", surfaceGyroidThickness: "Grosor de Giroide de Superficie",
+                crackColorInfluence: "Influencia de Color de Grieta",
+                crackWidthBase: "Base de Ancho de Grieta", crackWidthRange: "Rango de Ancho de Grieta",
+                crackNormalThreshold: "Umbral Normal de Grieta", crackFalloffFar: "Desvanecimiento Lejano de Grieta",
+                crackGyroid2Frequency: "Frecuencia de Giroide de Grieta", crackGyroid2Thickness: "Grosor de Giroide de Grieta",
+                crackGyroid2TimeSpeed: "Velocidad de Tiempo de Giroide de Grieta", crackGyroid2Multiplier: "Multiplicador de Giroide de Grieta",
+                crackNormalBlend: "Mezcla Normal de Grieta", crackColor: "Color de Grieta", crackIntensity: "Intensidad de Grieta",
+                exposureMultiplier: "Multiplicador de Exposición", gammaBoost: "Impulso de Gamma",
                 hexBorderRadius: "Radio de Borde Hexagonal", wallThickness: "Grosor de Pared", ringThickness: "Grosor de Anillo",
-                trailEdgeStart: "Inicio de Borde de Estela", trailEdgeEnd: "Fin de Borde de Estela",
                 colorDepthFrequency: "Frecuencia de Color por Profundidad", colorXFrequency: "Frecuencia de Color X",
                 colorSmoothness: "Suavidad de Color", glowEpsilon: "Épsilon de Brillo", glowMix: "Mezcla de Brillo", fogDensity: "Densidad de Niebla",
             },
@@ -3669,9 +4035,30 @@
                 fieldBase: "Base do Campo", fieldStrength: "Intensidade do Campo", emissionGain: "Ganho de Emissão",
                 neonHoneycombs: "Colmeias de Néon",
                 flightSpeed: "Velocidade de Voo", hexScale: "Escala Hexagonal",
-                cameraBlendStart: "Início da Mescla de Câmera", cameraBlendEnd: "Fim da Mescla de Câmera",
+                zSpacing: "Espaçamento Z",
+                collagenCave: "Caverna de Colágeno",
+                cameraOffsetX: "Deslocamento da Câmera X", pathFreqA: "Frequência de Trajetória A", pathFreqB: "Frequência de Trajetória B",
+                pathCoefA: "Coeficiente de Trajetória A", pathCoefB: "Coeficiente de Trajetória B", pathCoefC: "Coeficiente de Trajetória C", pathCoefD: "Coeficiente de Trajetória D",
+                fovDepth: "Profundidade de FOV",
+                voronoiTimeSpeed: "Velocidade de Tempo de Voronoi", cellWobbleAmp: "Oscilação de Célula", voronoiColorScale: "Escala de Cor de Voronoi",
+                gyroid1Frequency: "Frequência do Giroide 1", gyroid1Thickness: "Espessura do Giroide 1", gyroid1ColorInfluence: "Influência de Cor do Giroide 1",
+                gyroid2Frequency: "Frequência do Giroide 2", gyroid2Thickness: "Espessura do Giroide 2", blendSmoothness: "Suavidade da Mescla",
+                normalEpsilon: "Épsilon Normal",
+                noiseScaleX: "Escala de Ruído X", noiseScaleY: "Escala de Ruído Y", noiseScaleZ: "Escala de Ruído Z",
+                noiseGlobalScale: "Escala de Ruído Global", noiseOffsetX: "Deslocamento de Ruído X", noiseOctaves: "Oitavas de Ruído", noiseGain: "Ganho de Ruído",
+                lightDirX: "Direção da Luz X", lightDirY: "Direção da Luz Y", lightDirZ: "Direção da Luz Z",
+                normalNoiseAmp: "Quantidade de Ruído Normal", specPower: "Potência Especular", specIntensity: "Intensidade Especular", specColor: "Cor Especular",
+                backLightStrength: "Intensidade de Contraluz", backLightColor: "Cor de Contraluz",
+                rimPower: "Potência de Borda", rimIntensity: "Intensidade de Borda", rimColor: "Cor de Borda",
+                surfaceGyroidFrequency: "Frequência do Giroide de Superfície", surfaceGyroidThickness: "Espessura do Giroide de Superfície",
+                crackColorInfluence: "Influência de Cor da Rachadura",
+                crackWidthBase: "Base de Largura da Rachadura", crackWidthRange: "Faixa de Largura da Rachadura",
+                crackNormalThreshold: "Limiar Normal da Rachadura", crackFalloffFar: "Esmaecimento Distante da Rachadura",
+                crackGyroid2Frequency: "Frequência do Giroide da Rachadura", crackGyroid2Thickness: "Espessura do Giroide da Rachadura",
+                crackGyroid2TimeSpeed: "Velocidade de Tempo do Giroide da Rachadura", crackGyroid2Multiplier: "Multiplicador do Giroide da Rachadura",
+                crackNormalBlend: "Mescla Normal da Rachadura", crackColor: "Cor da Rachadura", crackIntensity: "Intensidade da Rachadura",
+                exposureMultiplier: "Multiplicador de Exposição", gammaBoost: "Aumento de Gama",
                 hexBorderRadius: "Raio da Borda Hexagonal", wallThickness: "Espessura da Parede", ringThickness: "Espessura do Anel",
-                trailEdgeStart: "Início da Borda do Rastro", trailEdgeEnd: "Fim da Borda do Rastro",
                 colorDepthFrequency: "Frequência de Cor por Profundidade", colorXFrequency: "Frequência de Cor X",
                 colorSmoothness: "Suavidade de Cor", glowEpsilon: "Épsilon de Brilho", glowMix: "Mistura de Brilho", fogDensity: "Densidade de Névoa",
             },
@@ -3812,9 +4199,30 @@
                 fieldBase: "フィールド基本値", fieldStrength: "フィールド強度", emissionGain: "放射ゲイン",
                 neonHoneycombs: "ネオンハニカム",
                 flightSpeed: "飛行速度", hexScale: "ヘックススケール",
-                cameraBlendStart: "カメラブレンド開始", cameraBlendEnd: "カメラブレンド終了",
+                zSpacing: "Z間隔",
+                collagenCave: "コラーゲンケイブ",
+                cameraOffsetX: "カメラオフセットX", pathFreqA: "パス周波数A", pathFreqB: "パス周波数B",
+                pathCoefA: "パス係数A", pathCoefB: "パス係数B", pathCoefC: "パス係数C", pathCoefD: "パス係数D",
+                fovDepth: "FOV深度",
+                voronoiTimeSpeed: "ボロノイ時間速度", cellWobbleAmp: "セル揺れ量", voronoiColorScale: "ボロノイ色スケール",
+                gyroid1Frequency: "ジャイロイド1周波数", gyroid1Thickness: "ジャイロイド1の厚さ", gyroid1ColorInfluence: "ジャイロイド1色影響",
+                gyroid2Frequency: "ジャイロイド2周波数", gyroid2Thickness: "ジャイロイド2の厚さ", blendSmoothness: "ブレンドの滑らかさ",
+                normalEpsilon: "法線イプシロン",
+                noiseScaleX: "ノイズスケールX", noiseScaleY: "ノイズスケールY", noiseScaleZ: "ノイズスケールZ",
+                noiseGlobalScale: "ノイズ全体スケール", noiseOffsetX: "ノイズオフセットX", noiseOctaves: "ノイズオクターブ", noiseGain: "ノイズゲイン",
+                lightDirX: "光の方向X", lightDirY: "光の方向Y", lightDirZ: "光の方向Z",
+                normalNoiseAmp: "法線ノイズ量", specPower: "スペキュラー強度指数", specIntensity: "スペキュラー強度", specColor: "スペキュラー色",
+                backLightStrength: "逆光の強さ", backLightColor: "逆光の色",
+                rimPower: "リム強度指数", rimIntensity: "リム強度", rimColor: "リムの色",
+                surfaceGyroidFrequency: "表面ジャイロイド周波数", surfaceGyroidThickness: "表面ジャイロイドの厚さ",
+                crackColorInfluence: "ひび割れ色影響",
+                crackWidthBase: "ひび割れ幅基準", crackWidthRange: "ひび割れ幅範囲",
+                crackNormalThreshold: "ひび割れ法線閾値", crackFalloffFar: "ひび割れ遠方減衰",
+                crackGyroid2Frequency: "ひび割れジャイロイド周波数", crackGyroid2Thickness: "ひび割れジャイロイドの厚さ",
+                crackGyroid2TimeSpeed: "ひび割れジャイロイド時間速度", crackGyroid2Multiplier: "ひび割れジャイロイド乗数",
+                crackNormalBlend: "ひび割れ法線ブレンド", crackColor: "ひび割れの色", crackIntensity: "ひび割れ強度",
+                exposureMultiplier: "露出乗数", gammaBoost: "ガンマブースト",
                 hexBorderRadius: "ヘックス境界半径", wallThickness: "壁の厚さ", ringThickness: "リングの厚さ",
-                trailEdgeStart: "トレイルエッジ開始", trailEdgeEnd: "トレイルエッジ終了",
                 colorDepthFrequency: "色深度周波数", colorXFrequency: "色X周波数",
                 colorSmoothness: "色の滑らかさ", glowEpsilon: "グローイプシロン", glowMix: "グローミックス", fogDensity: "霧の密度",
             },
@@ -3953,9 +4361,30 @@
                 fieldBase: "場基礎值", fieldStrength: "場強度", emissionGain: "發射增益",
                 neonHoneycombs: "霓虹蜂巢",
                 flightSpeed: "飛行速度", hexScale: "六邊形比例",
-                cameraBlendStart: "相機混合起點", cameraBlendEnd: "相機混合終點",
+                zSpacing: "Z間距",
+                collagenCave: "膠原蛋白洞穴",
+                cameraOffsetX: "相機偏移X", pathFreqA: "路徑頻率A", pathFreqB: "路徑頻率B",
+                pathCoefA: "路徑係數A", pathCoefB: "路徑係數B", pathCoefC: "路徑係數C", pathCoefD: "路徑係數D",
+                fovDepth: "視野深度",
+                voronoiTimeSpeed: "沃羅諾伊時間速度", cellWobbleAmp: "單元擺動幅度", voronoiColorScale: "沃羅諾伊顏色比例",
+                gyroid1Frequency: "螺旋面1頻率", gyroid1Thickness: "螺旋面1厚度", gyroid1ColorInfluence: "螺旋面1顏色影響",
+                gyroid2Frequency: "螺旋面2頻率", gyroid2Thickness: "螺旋面2厚度", blendSmoothness: "混合平滑度",
+                normalEpsilon: "法線極小值",
+                noiseScaleX: "雜訊比例X", noiseScaleY: "雜訊比例Y", noiseScaleZ: "雜訊比例Z",
+                noiseGlobalScale: "雜訊整體比例", noiseOffsetX: "雜訊偏移X", noiseOctaves: "雜訊倍頻程", noiseGain: "雜訊增益",
+                lightDirX: "光線方向X", lightDirY: "光線方向Y", lightDirZ: "光線方向Z",
+                normalNoiseAmp: "法線雜訊幅度", specPower: "高光強度指數", specIntensity: "高光強度", specColor: "高光顏色",
+                backLightStrength: "背光強度", backLightColor: "背光顏色",
+                rimPower: "邊緣光強度指數", rimIntensity: "邊緣光強度", rimColor: "邊緣光顏色",
+                surfaceGyroidFrequency: "表面螺旋面頻率", surfaceGyroidThickness: "表面螺旋面厚度",
+                crackColorInfluence: "裂紋顏色影響",
+                crackWidthBase: "裂紋寬度基準", crackWidthRange: "裂紋寬度範圍",
+                crackNormalThreshold: "裂紋法線閾值", crackFalloffFar: "裂紋遠端衰減",
+                crackGyroid2Frequency: "裂紋螺旋面頻率", crackGyroid2Thickness: "裂紋螺旋面厚度",
+                crackGyroid2TimeSpeed: "裂紋螺旋面時間速度", crackGyroid2Multiplier: "裂紋螺旋面乘數",
+                crackNormalBlend: "裂紋法線混合", crackColor: "裂紋顏色", crackIntensity: "裂紋強度",
+                exposureMultiplier: "曝光乘數", gammaBoost: "伽瑪增強",
                 hexBorderRadius: "六邊形邊界半徑", wallThickness: "牆壁厚度", ringThickness: "圓環厚度",
-                trailEdgeStart: "軌跡邊緣起點", trailEdgeEnd: "軌跡邊緣終點",
                 colorDepthFrequency: "顏色深度頻率", colorXFrequency: "顏色X頻率",
                 colorSmoothness: "顏色平滑度", glowEpsilon: "光暈極小值", glowMix: "光暈混合", fogDensity: "霧氣密度",
             }
@@ -4608,6 +5037,7 @@
 [Happy Glow Cruise](https://www.shadertoy.com/view/3ccyD7) by [diatribes](https://www.shadertoy.com/user/diatribes)
 [Fly in Digital Cave](https://codepen.io/editor/sabosugi/pen/01a05d05-8b0a-7e39-a456-6aeaa576ff84) by [Sabo Sugi](https://codepen.io/sabosugi)
 [Neon Honeycombs](https://shadertoy.com/view/f3t3z4) by [noztol](https://www.shadertoy.com/user/noztol)
+[KuKo #194](https://shadertoy.com/view/wX2fzh) by [kukovisuals](https://www.shadertoy.com/user/kukovisuals)
         `;
 
         function CreditHighlightHover({ children, href, className }) {
@@ -5518,15 +5948,11 @@
                         uPathFreqY: { value: 0.15 },
                         uPathAmpY: { value: 2.0 },
                         uHexScale: { value: 1.5 },
-                        uCameraBlendStart: { value: 0.15 },
-                        uCameraBlendEnd: { value: 0.85 },
                         uHexBorderRadius: { value: 0.5 },
                         uWallThickness: { value: 0.04 },
                         uRingThickness: { value: 0.05 },
                         uDistanceScale: { value: 0.8 },
                         uTrailSpeed: { value: 1.5 },
-                        uTrailEdgeStart: { value: 0.4 },
-                        uTrailEdgeEnd: { value: 1.0 },
                         uColorShiftSpeed: { value: 0.5 },
                         uColorDepthFrequency: { value: 0.4 },
                         uColorXFrequency: { value: 0.2 },
@@ -5544,6 +5970,73 @@
                         uMarchSteps: { value: 80 },
                         uMaxDist: { value: 50.0 },
                         uSurfaceEpsilon: { value: 0.001 },
+                        uHue: { value: 0.0 },
+                        uSaturation: { value: 1.0 },
+                    });
+                } else if (type === 'collagenCave') {
+                    baseFragment = collagenCaveFragShader;
+                    Object.assign(uniforms, {
+                        uFlightSpeed: { value: 4.0 },
+                        uCameraOffsetX: { value: 4.0 },
+                        uPathFreqA: { value: 0.131 },
+                        uPathFreqB: { value: 0.212 },
+                        uPathCoefA: { value: 1.1 },
+                        uPathCoefB: { value: 1.141 },
+                        uPathCoefC: { value: 1.41 },
+                        uPathCoefD: { value: 0.51 },
+                        uFovDepth: { value: -1.0 },
+                        uVoronoiScale: { value: 0.6 },
+                        uVoronoiTimeSpeed: { value: 0.5 },
+                        uCellWobbleAmp: { value: 0.15 },
+                        uVoronoiColorScale: { value: 4.0 },
+                        uGyroid1Frequency: { value: 0.3002 },
+                        uGyroid1Thickness: { value: -0.5 },
+                        uGyroid1ColorInfluence: { value: 0.08 },
+                        uGyroid2Frequency: { value: 0.3 },
+                        uGyroid2Thickness: { value: 0.05 },
+                        uBlendSmoothness: { value: 0.15 },
+                        uMarchSteps: { value: 80 },
+                        uSurfaceEpsilon: { value: 0.002 },
+                        uMaxDist: { value: 30.0 },
+                        uNormalEpsilon: { value: 0.001 },
+                        uNoiseScaleX: { value: 0.2 },
+                        uNoiseScaleY: { value: 0.45 },
+                        uNoiseScaleZ: { value: 0.6 },
+                        uNoiseGlobalScale: { value: 2.0 },
+                        uNoiseOffsetX: { value: 3.0 },
+                        uNoiseOctaves: { value: 10 },
+                        uNoiseGain: { value: 0.95 },
+                        uLightDirX: { value: 0.3745 },
+                        uLightDirY: { value: 0.4 },
+                        uLightDirZ: { value: 0.679 },
+                        uNormalNoiseAmp: { value: 0.6 },
+                        uSpecPower: { value: 24.0 },
+                        uSpecIntensity: { value: 0.02 },
+                        uSpecColor: { value: new THREE.Vector3(0.941, 0.957, 0.957) },
+                        uBackLightStrength: { value: 0.01 },
+                        uBackLightColor: { value: new THREE.Vector3(0.047, 0.035, 0.035) },
+                        uRimPower: { value: 3.0 },
+                        uRimIntensity: { value: 0.32 },
+                        uRimColor: { value: new THREE.Vector3(0.710, 0.133, 0.031) },
+                        uSurfaceGyroidFrequency: { value: 0.01 },
+                        uSurfaceGyroidThickness: { value: 0.3 },
+                        uCrackColorInfluence: { value: 0.44 },
+                        uCrackWidthBase: { value: -0.01 },
+                        uCrackWidthRange: { value: 0.24 },
+                        uCrackNormalThreshold: { value: -0.2 },
+                        uCrackFalloffFar: { value: -10.0 },
+                        uCrackGyroid2Frequency: { value: 0.3 },
+                        uCrackGyroid2Thickness: { value: 0.3 },
+                        uCrackGyroid2TimeSpeed: { value: 0.5 },
+                        uCrackGyroid2Multiplier: { value: 2.0 },
+                        uCrackNormalBlend: { value: 0.2 },
+                        uCrackColor: { value: new THREE.Vector3(1.0, 0.1, 0.1) },
+                        uCrackIntensity: { value: 1.0 },
+                        uFogDensity: { value: 0.000525 },
+                        uBackgroundColor: { value: new THREE.Vector3(0.0, 0.0, 0.0) },
+                        uExposureMultiplier: { value: 20.0 },
+                        uGammaBoost: { value: 1.1 },
+                        uGamma: { value: 2.2 },
                         uHue: { value: 0.0 },
                         uSaturation: { value: 1.0 },
                     });
@@ -6133,15 +6626,11 @@
                             mat.uniforms.uPathFreqY.value = cur.neonHoneycombs.pathFreqY;
                             mat.uniforms.uPathAmpY.value = cur.neonHoneycombs.pathAmpY;
                             mat.uniforms.uHexScale.value = cur.neonHoneycombs.hexScale;
-                            mat.uniforms.uCameraBlendStart.value = cur.neonHoneycombs.cameraBlendStart;
-                            mat.uniforms.uCameraBlendEnd.value = cur.neonHoneycombs.cameraBlendEnd;
                             mat.uniforms.uHexBorderRadius.value = cur.neonHoneycombs.hexBorderRadius;
                             mat.uniforms.uWallThickness.value = cur.neonHoneycombs.wallThickness;
                             mat.uniforms.uRingThickness.value = cur.neonHoneycombs.ringThickness;
                             mat.uniforms.uDistanceScale.value = cur.neonHoneycombs.distanceScale;
                             mat.uniforms.uTrailSpeed.value = cur.neonHoneycombs.trailSpeed;
-                            mat.uniforms.uTrailEdgeStart.value = cur.neonHoneycombs.trailEdgeStart;
-                            mat.uniforms.uTrailEdgeEnd.value = cur.neonHoneycombs.trailEdgeEnd;
                             mat.uniforms.uColorShiftSpeed.value = cur.neonHoneycombs.colorShiftSpeed;
                             mat.uniforms.uColorDepthFrequency.value = cur.neonHoneycombs.colorDepthFrequency;
                             mat.uniforms.uColorXFrequency.value = cur.neonHoneycombs.colorXFrequency;
@@ -6166,6 +6655,75 @@
                                     mat.uniforms.uColors.value[i].set(cr, cg, cb, 1.0);
                                 }
                             }
+                        } else if (cur.activeShader === 'collagenCave') {
+                            // Raw elapsed - flightSpeed/voronoiTimeSpeed/crackGyroid2TimeSpeed
+                            // each multiply uTime independently inside the shader, so
+                            // Freeze/manual-time works correctly.
+                            mat.uniforms.uTime.value = elapsed;
+                            mat.uniforms.uFlightSpeed.value = cur.collagenCave.flightSpeed;
+                            mat.uniforms.uCameraOffsetX.value = cur.collagenCave.cameraOffsetX;
+                            mat.uniforms.uPathFreqA.value = cur.collagenCave.pathFreqA;
+                            mat.uniforms.uPathFreqB.value = cur.collagenCave.pathFreqB;
+                            mat.uniforms.uPathCoefA.value = cur.collagenCave.pathCoefA;
+                            mat.uniforms.uPathCoefB.value = cur.collagenCave.pathCoefB;
+                            mat.uniforms.uPathCoefC.value = cur.collagenCave.pathCoefC;
+                            mat.uniforms.uPathCoefD.value = cur.collagenCave.pathCoefD;
+                            mat.uniforms.uFovDepth.value = cur.collagenCave.fovDepth;
+                            mat.uniforms.uVoronoiScale.value = cur.collagenCave.voronoiScale;
+                            mat.uniforms.uVoronoiTimeSpeed.value = cur.collagenCave.voronoiTimeSpeed;
+                            mat.uniforms.uCellWobbleAmp.value = cur.collagenCave.cellWobbleAmp;
+                            mat.uniforms.uVoronoiColorScale.value = cur.collagenCave.voronoiColorScale;
+                            mat.uniforms.uGyroid1Frequency.value = cur.collagenCave.gyroid1Frequency;
+                            mat.uniforms.uGyroid1Thickness.value = cur.collagenCave.gyroid1Thickness;
+                            mat.uniforms.uGyroid1ColorInfluence.value = cur.collagenCave.gyroid1ColorInfluence;
+                            mat.uniforms.uGyroid2Frequency.value = cur.collagenCave.gyroid2Frequency;
+                            mat.uniforms.uGyroid2Thickness.value = cur.collagenCave.gyroid2Thickness;
+                            mat.uniforms.uBlendSmoothness.value = cur.collagenCave.blendSmoothness;
+                            mat.uniforms.uMarchSteps.value = Math.round(cur.collagenCave.marchSteps);
+                            mat.uniforms.uSurfaceEpsilon.value = cur.collagenCave.surfaceEpsilon;
+                            mat.uniforms.uMaxDist.value = cur.collagenCave.maxDist;
+                            mat.uniforms.uNormalEpsilon.value = cur.collagenCave.normalEpsilon;
+                            mat.uniforms.uNoiseScaleX.value = cur.collagenCave.noiseScaleX;
+                            mat.uniforms.uNoiseScaleY.value = cur.collagenCave.noiseScaleY;
+                            mat.uniforms.uNoiseScaleZ.value = cur.collagenCave.noiseScaleZ;
+                            mat.uniforms.uNoiseGlobalScale.value = cur.collagenCave.noiseGlobalScale;
+                            mat.uniforms.uNoiseOffsetX.value = cur.collagenCave.noiseOffsetX;
+                            mat.uniforms.uNoiseOctaves.value = Math.round(cur.collagenCave.noiseOctaves);
+                            mat.uniforms.uNoiseGain.value = cur.collagenCave.noiseGain;
+                            mat.uniforms.uLightDirX.value = cur.collagenCave.lightDirX;
+                            mat.uniforms.uLightDirY.value = cur.collagenCave.lightDirY;
+                            mat.uniforms.uLightDirZ.value = cur.collagenCave.lightDirZ;
+                            mat.uniforms.uNormalNoiseAmp.value = cur.collagenCave.normalNoiseAmp;
+                            mat.uniforms.uSpecPower.value = cur.collagenCave.specPower;
+                            mat.uniforms.uSpecIntensity.value = cur.collagenCave.specIntensity;
+                            mat.uniforms.uBackLightStrength.value = cur.collagenCave.backLightStrength;
+                            mat.uniforms.uRimPower.value = cur.collagenCave.rimPower;
+                            mat.uniforms.uRimIntensity.value = cur.collagenCave.rimIntensity;
+                            mat.uniforms.uSurfaceGyroidFrequency.value = cur.collagenCave.surfaceGyroidFrequency;
+                            mat.uniforms.uSurfaceGyroidThickness.value = cur.collagenCave.surfaceGyroidThickness;
+                            mat.uniforms.uCrackColorInfluence.value = cur.collagenCave.crackColorInfluence;
+                            mat.uniforms.uCrackWidthBase.value = cur.collagenCave.crackWidthBase;
+                            mat.uniforms.uCrackWidthRange.value = cur.collagenCave.crackWidthRange;
+                            mat.uniforms.uCrackNormalThreshold.value = cur.collagenCave.crackNormalThreshold;
+                            mat.uniforms.uCrackFalloffFar.value = cur.collagenCave.crackFalloffFar;
+                            mat.uniforms.uCrackGyroid2Frequency.value = cur.collagenCave.crackGyroid2Frequency;
+                            mat.uniforms.uCrackGyroid2Thickness.value = cur.collagenCave.crackGyroid2Thickness;
+                            mat.uniforms.uCrackGyroid2TimeSpeed.value = cur.collagenCave.crackGyroid2TimeSpeed;
+                            mat.uniforms.uCrackGyroid2Multiplier.value = cur.collagenCave.crackGyroid2Multiplier;
+                            mat.uniforms.uCrackNormalBlend.value = cur.collagenCave.crackNormalBlend;
+                            mat.uniforms.uCrackIntensity.value = cur.collagenCave.crackIntensity;
+                            mat.uniforms.uFogDensity.value = cur.collagenCave.fogDensity;
+                            mat.uniforms.uExposureMultiplier.value = cur.collagenCave.exposureMultiplier;
+                            mat.uniforms.uGammaBoost.value = cur.collagenCave.gammaBoost;
+                            mat.uniforms.uGamma.value = cur.collagenCave.gamma;
+                            mat.uniforms.uHue.value = cur.collagenCave.hue;
+                            mat.uniforms.uSaturation.value = cur.collagenCave.saturation;
+                            mat.uniforms.uSpecColor.value.set(...cur.collagenCave.specColor);
+                            mat.uniforms.uBackLightColor.value.set(...cur.collagenCave.backLightColor);
+                            mat.uniforms.uRimColor.value.set(...cur.collagenCave.rimColor);
+                            mat.uniforms.uCrackColor.value.set(...cur.collagenCave.crackColor);
+                            const [bkr, bkg, bkb] = hexToRgbArray(cur.collagenCave.backgroundColor);
+                            mat.uniforms.uBackgroundColor.value.set(bkr, bkg, bkb);
                         }
                     }
 
@@ -6605,15 +7163,11 @@
                     pathFreqY: 0.15,
                     pathAmpY: 2.0,
                     hexScale: 1.5,
-                    cameraBlendStart: 0.15,
-                    cameraBlendEnd: 0.85,
                     hexBorderRadius: 0.5,
                     wallThickness: 0.04,
                     ringThickness: 0.05,
                     distanceScale: 0.8,
                     trailSpeed: 1.5,
-                    trailEdgeStart: 0.4,
-                    trailEdgeEnd: 1.0,
                     colorShiftSpeed: 0.5,
                     colorDepthFrequency: 0.4,
                     colorXFrequency: 0.2,
@@ -6632,6 +7186,71 @@
                     marchSteps: 80,
                     maxDist: 50.0,
                     surfaceEpsilon: 0.001,
+                    hue: 0,
+                    saturation: 1.0,
+                },
+                collagenCave: {
+                    flightSpeed: 4.0,
+                    cameraOffsetX: 4.0,
+                    pathFreqA: 0.131,
+                    pathFreqB: 0.212,
+                    pathCoefA: 1.1,
+                    pathCoefB: 1.141,
+                    pathCoefC: 1.41,
+                    pathCoefD: 0.51,
+                    fovDepth: -1.0,
+                    voronoiScale: 0.6,
+                    voronoiTimeSpeed: 0.5,
+                    cellWobbleAmp: 0.15,
+                    voronoiColorScale: 4.0,
+                    gyroid1Frequency: 0.3002,
+                    gyroid1Thickness: -0.5,
+                    gyroid1ColorInfluence: 0.08,
+                    gyroid2Frequency: 0.3,
+                    gyroid2Thickness: 0.05,
+                    blendSmoothness: 0.15,
+                    marchSteps: 80,
+                    surfaceEpsilon: 0.002,
+                    maxDist: 30.0,
+                    normalEpsilon: 0.001,
+                    noiseScaleX: 0.2,
+                    noiseScaleY: 0.45,
+                    noiseScaleZ: 0.6,
+                    noiseGlobalScale: 2.0,
+                    noiseOffsetX: 3.0,
+                    noiseOctaves: 10,
+                    noiseGain: 0.95,
+                    lightDirX: 0.3745,
+                    lightDirY: 0.4,
+                    lightDirZ: 0.679,
+                    normalNoiseAmp: 0.6,
+                    specPower: 24.0,
+                    specIntensity: 0.02,
+                    specColor: [0.941, 0.957, 0.957],
+                    backLightStrength: 0.01,
+                    backLightColor: [0.047, 0.035, 0.035],
+                    rimPower: 3.0,
+                    rimIntensity: 0.32,
+                    rimColor: [0.710, 0.133, 0.031],
+                    surfaceGyroidFrequency: 0.01,
+                    surfaceGyroidThickness: 0.3,
+                    crackColorInfluence: 0.44,
+                    crackWidthBase: -0.01,
+                    crackWidthRange: 0.24,
+                    crackNormalThreshold: -0.2,
+                    crackFalloffFar: -10.0,
+                    crackGyroid2Frequency: 0.3,
+                    crackGyroid2Thickness: 0.3,
+                    crackGyroid2TimeSpeed: 0.5,
+                    crackGyroid2Multiplier: 2.0,
+                    crackNormalBlend: 0.2,
+                    crackColor: [1.0, 0.1, 0.1],
+                    crackIntensity: 1.0,
+                    fogDensity: 0.000525,
+                    backgroundColor: "#000000",
+                    exposureMultiplier: 20.0,
+                    gammaBoost: 1.1,
+                    gamma: 2.2,
                     hue: 0,
                     saturation: 1.0,
                 },
@@ -6806,8 +7425,8 @@
                             </label>
                             <CustomSlider
                                 value={settings.fontSize}
-                                min={16}
-                                max={1600}
+                                min={10}
+                                max={1200}
                                 step={1}
                                 onValueChange={v => handleSlider('fontSize', v)}
                                 isRTL={dir === 'rtl'}
@@ -6878,7 +7497,7 @@
                         <div className="space-y-3 pt-4 border-t border-white/10">
                             <StaticSelect
                                 label={t('activeShader')}
-                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi', 'chromaticLight', 'halo', 'chromaticUniverse', 'membranes', 'neonKaleidoscope', 'glowCruise', 'digitalCave', 'neonHoneycombs'].map(v => ({
+                                options={['melt', 'flow', 'balatro', 'glass', 'chargedCells', 'luminousResin', 'swirl', 'spiralTunnel', 'kaleidoscope', 'fate', 'structuredNoise', 'hydrogen', 'neuralNoise', 'interstellar', 'spaceFlower', 'electricSpiral', 'voronoi', 'chromaticLight', 'halo', 'chromaticUniverse', 'membranes', 'neonKaleidoscope', 'glowCruise', 'digitalCave', 'neonHoneycombs', 'collagenCave'].map(v => ({
                                     value: v,
                                     label: v === 'luminousResin' ? t('luminousResin') : t(v),
                                 }))}
@@ -8372,10 +8991,6 @@
                                     update={v => updateNested('neonHoneycombs', 'pathAmpY', v)} dir={dir} />
                                 <ShaderSlider label={t('hexScale')} value={settings.neonHoneycombs.hexScale} min={0.2} max={5} step={0.01}
                                     update={v => updateNested('neonHoneycombs', 'hexScale', v)} dir={dir} />
-                                <ShaderSlider label={t('cameraBlendStart')} value={settings.neonHoneycombs.cameraBlendStart} min={0} max={1} step={0.01}
-                                    update={v => updateNested('neonHoneycombs', 'cameraBlendStart', v)} dir={dir} />
-                                <ShaderSlider label={t('cameraBlendEnd')} value={settings.neonHoneycombs.cameraBlendEnd} min={0} max={1} step={0.01}
-                                    update={v => updateNested('neonHoneycombs', 'cameraBlendEnd', v)} dir={dir} />
                                 <ShaderSlider label={t('hexBorderRadius')} value={settings.neonHoneycombs.hexBorderRadius} min={0.1} max={1} step={0.01}
                                     update={v => updateNested('neonHoneycombs', 'hexBorderRadius', v)} dir={dir} />
                                 <ShaderSlider label={t('wallThickness')} value={settings.neonHoneycombs.wallThickness} min={0.001} max={0.3} step={0.001}
@@ -8386,10 +9001,6 @@
                                     update={v => updateNested('neonHoneycombs', 'distanceScale', v)} dir={dir} />
                                 <ShaderSlider label={t('trailSpeed')} value={settings.neonHoneycombs.trailSpeed} min={-5} max={5} step={0.05}
                                     update={v => updateNested('neonHoneycombs', 'trailSpeed', v)} dir={dir} />
-                                <ShaderSlider label={t('trailEdgeStart')} value={settings.neonHoneycombs.trailEdgeStart} min={0} max={1} step={0.01}
-                                    update={v => updateNested('neonHoneycombs', 'trailEdgeStart', v)} dir={dir} />
-                                <ShaderSlider label={t('trailEdgeEnd')} value={settings.neonHoneycombs.trailEdgeEnd} min={0} max={1} step={0.01}
-                                    update={v => updateNested('neonHoneycombs', 'trailEdgeEnd', v)} dir={dir} />
                                 <ShaderSlider label={t('colorShiftSpeed')} value={settings.neonHoneycombs.colorShiftSpeed} min={-5} max={5} step={0.05}
                                     update={v => updateNested('neonHoneycombs', 'colorShiftSpeed', v)} dir={dir} />
                                 <ShaderSlider label={t('colorDepthFrequency')} value={settings.neonHoneycombs.colorDepthFrequency} min={0} max={2} step={0.01}
@@ -8463,6 +9074,181 @@
                                                 </div>
                                             );
                                         })}
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* COLLAGEN CAVE SHADER */}
+                        {settings.activeShader === 'collagenCave' && (
+                            <>
+                                {/* Camera / Path */}
+                                <ShaderSlider label={t('flightSpeed')} value={settings.collagenCave.flightSpeed} min={-10} max={10} step={0.1}
+                                    update={v => updateNested('collagenCave', 'flightSpeed', v)} dir={dir} />
+                                <ShaderSlider label={t('cameraOffsetX')} value={settings.collagenCave.cameraOffsetX} min={-10} max={10} step={0.1}
+                                    update={v => updateNested('collagenCave', 'cameraOffsetX', v)} dir={dir} />
+                                <ShaderSlider label={t('fovDepth')} value={settings.collagenCave.fovDepth} min={-3} max={-0.2} step={0.01}
+                                    update={v => updateNested('collagenCave', 'fovDepth', v)} dir={dir} />
+                                <ShaderSlider label={t('pathFreqA')} value={settings.collagenCave.pathFreqA} min={0} max={1} step={0.001}
+                                    update={v => updateNested('collagenCave', 'pathFreqA', v)} dir={dir} />
+                                <ShaderSlider label={t('pathFreqB')} value={settings.collagenCave.pathFreqB} min={0} max={1} step={0.001}
+                                    update={v => updateNested('collagenCave', 'pathFreqB', v)} dir={dir} />
+                                <ShaderSlider label={t('pathCoefA')} value={settings.collagenCave.pathCoefA} min={-3} max={3} step={0.01}
+                                    update={v => updateNested('collagenCave', 'pathCoefA', v)} dir={dir} />
+                                <ShaderSlider label={t('pathCoefB')} value={settings.collagenCave.pathCoefB} min={-3} max={3} step={0.01}
+                                    update={v => updateNested('collagenCave', 'pathCoefB', v)} dir={dir} />
+                                <ShaderSlider label={t('pathCoefC')} value={settings.collagenCave.pathCoefC} min={-3} max={3} step={0.01}
+                                    update={v => updateNested('collagenCave', 'pathCoefC', v)} dir={dir} />
+                                <ShaderSlider label={t('pathCoefD')} value={settings.collagenCave.pathCoefD} min={-3} max={3} step={0.01}
+                                    update={v => updateNested('collagenCave', 'pathCoefD', v)} dir={dir} />
+
+                                {/* Voronoi / Structure */}
+                                <ShaderSlider label={t('voronoiScale')} value={settings.collagenCave.voronoiScale} min={0.05} max={3} step={0.01}
+                                    update={v => updateNested('collagenCave', 'voronoiScale', v)} dir={dir} />
+                                <ShaderSlider label={t('voronoiTimeSpeed')} value={settings.collagenCave.voronoiTimeSpeed} min={-3} max={3} step={0.01}
+                                    update={v => updateNested('collagenCave', 'voronoiTimeSpeed', v)} dir={dir} />
+                                <ShaderSlider label={t('cellWobbleAmp')} value={settings.collagenCave.cellWobbleAmp} min={0} max={1} step={0.01}
+                                    update={v => updateNested('collagenCave', 'cellWobbleAmp', v)} dir={dir} />
+                                <ShaderSlider label={t('voronoiColorScale')} value={settings.collagenCave.voronoiColorScale} min={0} max={10} step={0.1}
+                                    update={v => updateNested('collagenCave', 'voronoiColorScale', v)} dir={dir} />
+
+                                {/* Gyroid Structure */}
+                                <ShaderSlider label={t('gyroid1Frequency')} value={settings.collagenCave.gyroid1Frequency} min={0.01} max={2} step={0.001}
+                                    update={v => updateNested('collagenCave', 'gyroid1Frequency', v)} dir={dir} />
+                                <ShaderSlider label={t('gyroid1Thickness')} value={settings.collagenCave.gyroid1Thickness} min={-2} max={2} step={0.01}
+                                    update={v => updateNested('collagenCave', 'gyroid1Thickness', v)} dir={dir} />
+                                <ShaderSlider label={t('gyroid1ColorInfluence')} value={settings.collagenCave.gyroid1ColorInfluence} min={0} max={1} step={0.01}
+                                    update={v => updateNested('collagenCave', 'gyroid1ColorInfluence', v)} dir={dir} />
+                                <ShaderSlider label={t('gyroid2Frequency')} value={settings.collagenCave.gyroid2Frequency} min={0.01} max={2} step={0.001}
+                                    update={v => updateNested('collagenCave', 'gyroid2Frequency', v)} dir={dir} />
+                                <ShaderSlider label={t('gyroid2Thickness')} value={settings.collagenCave.gyroid2Thickness} min={-1} max={1} step={0.01}
+                                    update={v => updateNested('collagenCave', 'gyroid2Thickness', v)} dir={dir} />
+                                <ShaderSlider label={t('blendSmoothness')} value={settings.collagenCave.blendSmoothness} min={0.01} max={1} step={0.01}
+                                    update={v => updateNested('collagenCave', 'blendSmoothness', v)} dir={dir} />
+
+                                {/* Raymarch */}
+                                <ShaderSlider label={t('marchSteps')} value={settings.collagenCave.marchSteps} min={10} max={200} step={1}
+                                    update={v => updateNested('collagenCave', 'marchSteps', v)} dir={dir} />
+                                <ShaderSlider label={t('surfaceEpsilon')} value={settings.collagenCave.surfaceEpsilon} min={0.0001} max={0.02} step={0.0001}
+                                    update={v => updateNested('collagenCave', 'surfaceEpsilon', v)} dir={dir} />
+                                <ShaderSlider label={t('maxDist')} value={settings.collagenCave.maxDist} min={5} max={80} step={0.5}
+                                    update={v => updateNested('collagenCave', 'maxDist', v)} dir={dir} />
+                                <ShaderSlider label={t('normalEpsilon')} value={settings.collagenCave.normalEpsilon} min={0.0001} max={0.02} step={0.0001}
+                                    update={v => updateNested('collagenCave', 'normalEpsilon', v)} dir={dir} />
+
+                                {/* Noise */}
+                                <ShaderSlider label={t('noiseScaleX')} value={settings.collagenCave.noiseScaleX} min={0} max={2} step={0.01}
+                                    update={v => updateNested('collagenCave', 'noiseScaleX', v)} dir={dir} />
+                                <ShaderSlider label={t('noiseScaleY')} value={settings.collagenCave.noiseScaleY} min={0} max={2} step={0.01}
+                                    update={v => updateNested('collagenCave', 'noiseScaleY', v)} dir={dir} />
+                                <ShaderSlider label={t('noiseScaleZ')} value={settings.collagenCave.noiseScaleZ} min={0} max={2} step={0.01}
+                                    update={v => updateNested('collagenCave', 'noiseScaleZ', v)} dir={dir} />
+                                <ShaderSlider label={t('noiseGlobalScale')} value={settings.collagenCave.noiseGlobalScale} min={0} max={5} step={0.01}
+                                    update={v => updateNested('collagenCave', 'noiseGlobalScale', v)} dir={dir} />
+                                <ShaderSlider label={t('noiseOffsetX')} value={settings.collagenCave.noiseOffsetX} min={-10} max={10} step={0.1}
+                                    update={v => updateNested('collagenCave', 'noiseOffsetX', v)} dir={dir} />
+                                <ShaderSlider label={t('noiseOctaves')} value={settings.collagenCave.noiseOctaves} min={1} max={10} step={1}
+                                    update={v => updateNested('collagenCave', 'noiseOctaves', v)} dir={dir} />
+                                <ShaderSlider label={t('noiseGain')} value={settings.collagenCave.noiseGain} min={0} max={1} step={0.01}
+                                    update={v => updateNested('collagenCave', 'noiseGain', v)} dir={dir} />
+
+                                {/* Lighting */}
+                                <ShaderSlider label={t('lightDirX')} value={settings.collagenCave.lightDirX} min={-1} max={1} step={0.01}
+                                    update={v => updateNested('collagenCave', 'lightDirX', v)} dir={dir} />
+                                <ShaderSlider label={t('lightDirY')} value={settings.collagenCave.lightDirY} min={-1} max={1} step={0.01}
+                                    update={v => updateNested('collagenCave', 'lightDirY', v)} dir={dir} />
+                                <ShaderSlider label={t('lightDirZ')} value={settings.collagenCave.lightDirZ} min={-1} max={1} step={0.01}
+                                    update={v => updateNested('collagenCave', 'lightDirZ', v)} dir={dir} />
+                                <ShaderSlider label={t('normalNoiseAmp')} value={settings.collagenCave.normalNoiseAmp} min={0} max={3} step={0.01}
+                                    update={v => updateNested('collagenCave', 'normalNoiseAmp', v)} dir={dir} />
+                                <ShaderSlider label={t('specPower')} value={settings.collagenCave.specPower} min={1} max={64} step={0.5}
+                                    update={v => updateNested('collagenCave', 'specPower', v)} dir={dir} />
+                                <ShaderSlider label={t('specIntensity')} value={settings.collagenCave.specIntensity} min={0} max={0.2} step={0.001}
+                                    update={v => updateNested('collagenCave', 'specIntensity', v)} dir={dir} />
+                                <ShaderSlider label={t('backLightStrength')} value={settings.collagenCave.backLightStrength} min={0} max={0.1} step={0.001}
+                                    update={v => updateNested('collagenCave', 'backLightStrength', v)} dir={dir} />
+                                <ShaderSlider label={t('rimPower')} value={settings.collagenCave.rimPower} min={0.5} max={8} step={0.1}
+                                    update={v => updateNested('collagenCave', 'rimPower', v)} dir={dir} />
+                                <ShaderSlider label={t('rimIntensity')} value={settings.collagenCave.rimIntensity} min={0} max={2} step={0.01}
+                                    update={v => updateNested('collagenCave', 'rimIntensity', v)} dir={dir} />
+
+                                {/* Cracks */}
+                                <ShaderSlider label={t('surfaceGyroidFrequency')} value={settings.collagenCave.surfaceGyroidFrequency} min={0.001} max={0.5} step={0.001}
+                                    update={v => updateNested('collagenCave', 'surfaceGyroidFrequency', v)} dir={dir} />
+                                <ShaderSlider label={t('surfaceGyroidThickness')} value={settings.collagenCave.surfaceGyroidThickness} min={-1} max={1} step={0.01}
+                                    update={v => updateNested('collagenCave', 'surfaceGyroidThickness', v)} dir={dir} />
+                                <ShaderSlider label={t('crackColorInfluence')} value={settings.collagenCave.crackColorInfluence} min={0} max={2} step={0.01}
+                                    update={v => updateNested('collagenCave', 'crackColorInfluence', v)} dir={dir} />
+                                <ShaderSlider label={t('crackWidthBase')} value={settings.collagenCave.crackWidthBase} min={-0.2} max={0.2} step={0.001}
+                                    update={v => updateNested('collagenCave', 'crackWidthBase', v)} dir={dir} />
+                                <ShaderSlider label={t('crackWidthRange')} value={settings.collagenCave.crackWidthRange} min={0} max={1} step={0.01}
+                                    update={v => updateNested('collagenCave', 'crackWidthRange', v)} dir={dir} />
+                                <ShaderSlider label={t('crackNormalThreshold')} value={settings.collagenCave.crackNormalThreshold} min={-1} max={1} step={0.01}
+                                    update={v => updateNested('collagenCave', 'crackNormalThreshold', v)} dir={dir} />
+                                <ShaderSlider label={t('crackFalloffFar')} value={settings.collagenCave.crackFalloffFar} min={-20} max={-1} step={0.5}
+                                    update={v => updateNested('collagenCave', 'crackFalloffFar', v)} dir={dir} />
+                                <ShaderSlider label={t('crackGyroid2Frequency')} value={settings.collagenCave.crackGyroid2Frequency} min={0.01} max={2} step={0.001}
+                                    update={v => updateNested('collagenCave', 'crackGyroid2Frequency', v)} dir={dir} />
+                                <ShaderSlider label={t('crackGyroid2Thickness')} value={settings.collagenCave.crackGyroid2Thickness} min={-1} max={1} step={0.01}
+                                    update={v => updateNested('collagenCave', 'crackGyroid2Thickness', v)} dir={dir} />
+                                <ShaderSlider label={t('crackGyroid2TimeSpeed')} value={settings.collagenCave.crackGyroid2TimeSpeed} min={-3} max={3} step={0.01}
+                                    update={v => updateNested('collagenCave', 'crackGyroid2TimeSpeed', v)} dir={dir} />
+                                <ShaderSlider label={t('crackGyroid2Multiplier')} value={settings.collagenCave.crackGyroid2Multiplier} min={0} max={5} step={0.01}
+                                    update={v => updateNested('collagenCave', 'crackGyroid2Multiplier', v)} dir={dir} />
+                                <ShaderSlider label={t('crackNormalBlend')} value={settings.collagenCave.crackNormalBlend} min={0} max={2} step={0.01}
+                                    update={v => updateNested('collagenCave', 'crackNormalBlend', v)} dir={dir} />
+                                <ShaderSlider label={t('crackIntensity')} value={settings.collagenCave.crackIntensity} min={0} max={3} step={0.01}
+                                    update={v => updateNested('collagenCave', 'crackIntensity', v)} dir={dir} />
+
+                                {/* Final mapping */}
+                                <ShaderSlider label={t('fogDensity')} value={settings.collagenCave.fogDensity} min={0} max={0.005} step={0.000005}
+                                    update={v => updateNested('collagenCave', 'fogDensity', v)} dir={dir} />
+                                <ShaderSlider label={t('exposureMultiplier')} value={settings.collagenCave.exposureMultiplier} min={0} max={60} step={0.5}
+                                    update={v => updateNested('collagenCave', 'exposureMultiplier', v)} dir={dir} />
+                                <ShaderSlider label={t('gammaBoost')} value={settings.collagenCave.gammaBoost} min={0.1} max={3} step={0.01}
+                                    update={v => updateNested('collagenCave', 'gammaBoost', v)} dir={dir} />
+                                <ShaderSlider label={t('gamma')} value={settings.collagenCave.gamma} min={0.5} max={4} step={0.01}
+                                    update={v => updateNested('collagenCave', 'gamma', v)} dir={dir} />
+                                <ShaderSlider label={t('hue')} value={settings.collagenCave.hue} min={0} max={360} step={1}
+                                    update={v => updateNested('collagenCave', 'hue', v)} dir={dir} />
+                                <ShaderSlider label={t('saturation')} value={settings.collagenCave.saturation} min={0} max={2} step={0.05}
+                                    update={v => updateNested('collagenCave', 'saturation', v)} dir={dir} />
+
+                                <div className="flex flex-wrap gap-6 mt-4">
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('specColor')}</span>
+                                        <ColorPicker
+                                            color={rgbArrayToHex(settings.collagenCave.specColor)}
+                                            onChange={h => updateNested('collagenCave', 'specColor', hexToRgbArray(h))}
+                                        />
+                                    </div>
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('backLightColor')}</span>
+                                        <ColorPicker
+                                            color={rgbArrayToHex(settings.collagenCave.backLightColor)}
+                                            onChange={h => updateNested('collagenCave', 'backLightColor', hexToRgbArray(h))}
+                                        />
+                                    </div>
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('rimColor')}</span>
+                                        <ColorPicker
+                                            color={rgbArrayToHex(settings.collagenCave.rimColor)}
+                                            onChange={h => updateNested('collagenCave', 'rimColor', hexToRgbArray(h))}
+                                        />
+                                    </div>
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('crackColor')}</span>
+                                        <ColorPicker
+                                            color={rgbArrayToHex(settings.collagenCave.crackColor)}
+                                            onChange={h => updateNested('collagenCave', 'crackColor', hexToRgbArray(h))}
+                                        />
+                                    </div>
+                                    <div className="flex-1 min-w-[300px] space-y-2">
+                                        <span className="text-xs uppercase text-gray-500">{t('colorBack')}</span>
+                                        <ColorPicker
+                                            color={settings.collagenCave.backgroundColor}
+                                            onChange={h => updateNested('collagenCave', 'backgroundColor', h)}
+                                        />
                                     </div>
                                 </div>
                             </>

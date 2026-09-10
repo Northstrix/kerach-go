@@ -110,6 +110,8 @@ The app is fully localized into:
 
 [Neon Honeycombs](https://shadertoy.com/view/f3t3z4) by [noztol](https://www.shadertoy.com/user/noztol)
 
+[KuKo #194](https://shadertoy.com/view/wX2fzh) by [kukovisuals](https://www.shadertoy.com/user/kukovisuals)
+
 ### Shader Modification & Attribution Disclosure
 
 Regarding the shaders distributed under the Creative Commons Attribution-NonCommercial-ShareAlike (CC BY-NC-SA 3.0 / CC BY-NC-SA 4.0) licenses:
